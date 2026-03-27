@@ -1,5 +1,5 @@
 import os
-import google.generativeai as genai
+from google import genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -12,14 +12,15 @@ if not TELEGRAM_TOKEN:
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY belum di set")
 
-# Gemini setup
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+# Setup Gemini baru
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Generate story
+# Generator cerita
 def generate_romcom(prompt):
     try:
-        full_prompt = f"""
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=f"""
 Buat cerita ROMCOM lucu, ringan, banyak dialog.
 Gaya Gen Z Indonesia, ending happy.
 
@@ -30,21 +31,18 @@ Judul:
 Karakter:
 Cerita:
 """
-        response = model.generate_content(full_prompt)
+        )
 
-        if not response or not response.text:
-            return "⚠️ AI lagi sibuk, coba lagi..."
-
-        return response.text
+        return response.text if response.text else "⚠️ AI tidak merespon"
 
     except Exception as e:
         return f"❌ Error AI: {str(e)}"
 
-# Command start
+# Start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💖 Kirim ide romcom!")
 
-# Handle message
+# Handle
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Lagi bikin cerita...")
 
@@ -55,14 +53,13 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(story)
 
-# MAIN (VERSI STABIL)
+# Main
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-    # 🔥 reset koneksi lama
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
