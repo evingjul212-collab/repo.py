@@ -1,46 +1,45 @@
 import telebot
-import google.generativeai as genai
+from google import genai
 import os
+import time
 
-# 1. AMBIL DATA DARI RAILWAY VARIABLES (ATAU ISI MANUAL DI SINI)
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7862891281:AAHxxxx_xxxxxxxxxxxxxxx')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', 'AIzaSyxxxx_xxxxxxxxxxxxxxx')
+# 1. DATA DARI RAILWAY VARIABLES
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
-
+# Inisialisasi Google GenAI Terbaru
+client = genai.Client(api_key=GEMINI_API_KEY)
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# BUKU CATATAN (HISTORY) AGAR BISA "LANJUTKAN"
-# Kita simpan per User ID
-sesi_chat = {}
+# Buku Catatan History per User
+chat_sessions = {}
 
 @bot.message_handler(func=lambda message: True)
-def proses_cerita(message):
+def proses_chat(message):
     user_id = message.from_user.id
-    
     try:
         # Jika belum ada ingatan, buatkan sesi baru
-        if user_id not in sesi_chat:
-            # Mulai chat dengan instruksi kepribadian penulis Romkom
-            sesi_chat[user_id] = model.start_chat(history=[])
-            # Pesan pertama kita suntikkan instruksi gaya bahasa
-            instruksi = f"Kamu adalah penulis skenario Romantis Komedi pro. Gunakan Bahasa Indonesia yang luwes, puitis, dan lucu. Ide awal: {message.text}"
-            response = sesi_chat[user_id].send_message(instruksi)
+        if user_id not in chat_sessions:
+            chat_sessions[user_id] = client.chats.create(model="gemini-1.5-flash")
+            prompt = f"Kamu penulis Romkom pro. Gunakan Bahasa Indonesia yang luwes dan puitis. Ide: {message.text}"
         else:
-            # Jika sudah ada ingatan, tinggal kirim perintah "Lanjutkan" atau ide baru
-            response = sesi_chat[user_id].send_message(message.text)
+            prompt = message.text
+        
+        # Kirim pesan (Cara Baru)
+        response = chat_sessions[user_id].send_message(prompt)
         
         bot.reply_to(message, response.text)
         
     except Exception as e:
-        print(f"Error: {e}")
-        # Jika error kepenuhan memori, kita reset biar gak macet
-        if user_id in sesi_chat:
-            del sesi_chat[user_id]
-        bot.reply_to(message, "Aduh Boss, Google-nya 'hang' sebentar. Coba ketik ide baru ya!")
+        print(f"Error detail: {e}")
+        # Jika error model/limit, coba reset sesi
+        if user_id in chat_sessions:
+            del chat_sessions[user_id]
+        bot.reply_to(message, "Google lagi update sistem, coba chat 'Halo' lagi ya Boss!")
 
-# Jalankan Bot
 if __name__ == "__main__":
-    print("BOT ROMKOM ONLINE DI RAILWAY!")
-    bot.infinity_polling()
+    print("MEMBERSIHKAN JALUR...")
+    bot.remove_webhook()
+    time.sleep(1)
+    print("BOT ROMKOM (GEN-AI 2.0) ONLINE DI RAILWAY!")
+    bot.infinity_polling(skip_pending=True)
