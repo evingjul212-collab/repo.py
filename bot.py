@@ -1,56 +1,42 @@
-import os
-from openai import OpenAI
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import telebot
+import google.generativeai as genai
 
-# ENV
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# MASUKKAN TOKEN & KEY MILIKMU
+TELEGRAM_TOKEN = '8628912811:AAHqGY3moKiTggiS3lNNg_PogIHurW68dTo'
+GEMINI_API_KEY = 'AIzaSyB5i8SrI9t6rkweFZrhuNAMcolnCJ6DCfE'
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
 
-# Generator cerita
-def generate_romcom(prompt):
+# --- BAGIAN DETEKTIF MODEL ---
+print("Sedang mencari daftar model yang tersedia...")
+model_siap = ""
+try:
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            print(f"Ketemu model: {m.name}")
+            if not model_siap: # Ambil model pertama yang ketemu
+                model_siap = m.name
+except Exception as e:
+    print(f"Gagal mencari model: {e}")
+
+# Pakai model yang baru saja kita temukan
+if model_siap:
+    print(f"MEMAKAI MODEL: {model_siap}")
+    model = genai.GenerativeModel(model_siap)
+else:
+    print("GAK ADA MODEL KETEMU! Pakai standar saja.")
+    model = genai.GenerativeModel('gemini-1.5-flash')
+
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+@bot.message_handler(func=lambda message: True)
+def ceritakan(message):
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Kamu penulis romcom Indonesia lucu, gaya Gen Z."},
-                {"role": "user", "content": f"Buat cerita romcom: {prompt}"}
-            ],
-            max_tokens=800
-        )
-
-        return response.choices[0].message.content
-
+        print(f"User nanya: {message.text}")
+        response = model.generate_content(f"Jawab singkat: {message.text}")
+        bot.reply_to(message, response.text)
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        bot.reply_to(message, f"Aduh, masih error: {str(e)[:100]}")
 
-# Start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💖 Kirim ide romcom!")
-
-# Handle
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ Lagi bikin cerita...")
-
-    story = generate_romcom(update.message.text)
-
-    if len(story) > 3500:
-        story = story[:3500]
-
-    await update.message.reply_text(story)
-
-# Main
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-
-    print("✅ Bot jalan...")
-
-    app.run_polling(drop_pending_updates=True)
-
-if __name__ == "__main__":
-    main()
+print("BOT SIAP! Coba chat lagi...")
+bot.polling()
