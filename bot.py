@@ -1,42 +1,51 @@
+import os
 import telebot
 import google.generativeai as genai
 
-# MASUKKAN TOKEN & KEY MILIKMU
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-# --- BAGIAN DETEKTIF MODEL ---
-print("Sedang mencari daftar model yang tersedia...")
-model_siap = ""
+print("🔍 Mencari model Gemini...")
+
+model_siap = None
+
 try:
     for m in genai.list_models():
         if 'generateContent' in m.supported_generation_methods:
-            print(f"Ketemu model: {m.name}")
-            if not model_siap: # Ambil model pertama yang ketemu
-                model_siap = m.name
+            print("✔ Model ditemukan:", m.name)
+            model_siap = m.name
+            break
 except Exception as e:
-    print(f"Gagal mencari model: {e}")
+    print("❌ Gagal ambil model:", e)
 
-# Pakai model yang baru saja kita temukan
-if model_siap:
-    print(f"MEMAKAI MODEL: {model_siap}")
-    model = genai.GenerativeModel(model_siap)
-else:
-    print("GAK ADA MODEL KETEMU! Pakai standar saja.")
-    model = genai.GenerativeModel('gemini-1.5-flash')
+if not model_siap:
+    model_siap = "gemini-1.5-flash"
+
+print("🚀 Pakai model:", model_siap)
+
+model = genai.GenerativeModel(model_siap)
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 @bot.message_handler(func=lambda message: True)
-def ceritakan(message):
+def handle(message):
     try:
-        print(f"User nanya: {message.text}")
-        response = model.generate_content(f"Jawab singkat: {message.text}")
-        bot.reply_to(message, response.text)
-    except Exception as e:
-        bot.reply_to(message, f"Aduh, masih error: {str(e)[:100]}")
+        print("User:", message.text)
 
-print("BOT SIAP! Coba chat lagi...")
-bot.polling()
+        response = model.generate_content(
+            f"Buat cerita romcom lucu Indonesia: {message.text}"
+        )
+
+        if not response or not response.text:
+            bot.reply_to(message, "⚠️ AI lagi sibuk, coba lagi...")
+            return
+
+        bot.reply_to(message, response.text[:3500])
+
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {str(e)[:100]}")
+
+print("✅ BOT JALAN...")
+bot.infinity_polling()
