@@ -12,7 +12,7 @@ if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY belum di set")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 def generate_romcom(prompt):
     full_prompt = f"""
