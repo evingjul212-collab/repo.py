@@ -1,4 +1,5 @@
 import os
+import asyncio
 import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -12,13 +13,14 @@ if not TELEGRAM_TOKEN:
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY belum di set")
 
-# Setup Gemini (MODEL BARU)
+# Setup Gemini (model terbaru & aman)
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Generator cerita
 def generate_romcom(prompt):
-    full_prompt = f"""
+    try:
+        full_prompt = f"""
 Buat cerita ROMCOM (romantis komedi) yang:
 - Lucu, ringan, banyak dialog
 - Gaya Gen Z Indonesia
@@ -32,8 +34,15 @@ Judul:
 Karakter:
 Cerita:
 """
-    response = model.generate_content(full_prompt)
-    return response.text
+        response = model.generate_content(full_prompt)
+
+        if not response or not response.text:
+            return "⚠️ AI lagi sibuk, coba lagi ya..."
+
+        return response.text
+
+    except Exception as e:
+        return f"❌ Error AI: {str(e)}"
 
 # Command /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45,23 +54,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Lagi bikin cerita...")
 
-    try:
-        story = generate_romcom(update.message.text)
+    story = generate_romcom(update.message.text)
 
-        # Batasi panjang biar aman
-        if len(story) > 3500:
-            story = story[:3500] + "\n\n...(dipotong)"
+    # Batas panjang Telegram
+    if len(story) > 3500:
+        story = story[:3500] + "\n\n...(dipotong)"
 
-        await update.message.reply_text(story)
+    await update.message.reply_text(story)
 
-    except Exception as e:
-        await update.message.reply_text("❌ Error: " + str(e))
+# Main async runner (FIX CONFLICT TELEGRAM)
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-# Run bot
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+    # 🔥 Reset koneksi lama Telegram (WAJIB)
+    await app.bot.delete_webhook(drop_pending_updates=True)
 
-print("✅ Bot jalan...")
-app.run_polling()
+    print("✅ Bot jalan...")
+
+    await app.run_polling()
+
+# Run
+if __name__ == "__main__":
+    asyncio.run(main())
