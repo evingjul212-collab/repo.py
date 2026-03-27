@@ -2,8 +2,8 @@ import telebot
 import google.generativeai as genai
 
 # MASUKKAN TOKEN & KEY MILIKMU
-TELEGRAM_TOKEN = '8628912811:AAHqGY3moKiTggiS3lNNg_PogIHurW68dTo'
-GEMINI_API_KEY = 'AIzaSyB5i8SrI9t6rkweFZrhuNAMcolnCJ6DCfE'
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 
