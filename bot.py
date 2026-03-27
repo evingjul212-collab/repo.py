@@ -1,5 +1,5 @@
 import telebot
-from google import genai
+import google.generativeai as genai
 import os
 import time
 
@@ -7,39 +7,49 @@ import time
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-# Inisialisasi Google GenAI Terbaru
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Konfigurasi Paksa ke Versi v1 (Bukan v1beta)
+genai.configure(api_key=GEMINI_API_KEY, transport='rest')
+
+# Gunakan nama model polosan tanpa embel-embel models/
+model_name = 'gemini-1.5-flash' 
+
+# Inisialisasi Model
+model = genai.GenerativeModel(model_name)
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# Buku Catatan History per User
+# Buku Catatan History (Sesi Chat)
 chat_sessions = {}
 
 @bot.message_handler(func=lambda message: True)
 def proses_chat(message):
     user_id = message.from_user.id
     try:
-        # Jika belum ada ingatan, buatkan sesi baru
+        # Jika belum ada sesi, mulai baru
         if user_id not in chat_sessions:
-            chat_sessions[user_id] = client.chats.create(model="gemini-1.5-flash")
-            prompt = f"Kamu penulis Romkom pro. Gunakan Bahasa Indonesia yang luwes dan puitis. Ide: {message.text}"
+            chat_sessions[user_id] = model.start_chat(history=[])
+            instruksi = f"Kamu penulis Romkom pro. Gunakan Bahasa Indonesia yang luwes. Ide: {message.text}"
+            response = chat_sessions[user_id].send_message(instruksi)
         else:
-            prompt = message.text
-        
-        # Kirim pesan (Cara Baru)
-        response = chat_sessions[user_id].send_message(prompt)
+            # Lanjutkan cerita sebelumnya
+            response = chat_sessions[user_id].send_message(message.text)
         
         bot.reply_to(message, response.text)
         
     except Exception as e:
         print(f"Error detail: {e}")
-        # Jika error model/limit, coba reset sesi
+        # Jika error 404/429, kita hapus sesi biar bisa mulai ulang
         if user_id in chat_sessions:
             del chat_sessions[user_id]
-        bot.reply_to(message, "Google lagi update sistem, coba chat 'Halo' lagi ya Boss!")
+        
+        # Pesan error yang lebih informatif untuk kamu di Telegram
+        if "404" in str(e):
+            bot.reply_to(message, "Aduh Boss, Google ganti jalur lagi (404). Tunggu saya 'reconnect' ya!")
+        else:
+            bot.reply_to(message, "Ada kendala teknis, coba ketik 'Halo' lagi!")
 
 if __name__ == "__main__":
-    print("MEMBERSIHKAN JALUR...")
+    print("MEMBERSIHKAN JALUR WEBHOOK...")
     bot.remove_webhook()
     time.sleep(1)
-    print("BOT ROMKOM (GEN-AI 2.0) ONLINE DI RAILWAY!")
+    print(f"BOT ROMKOM ONLINE PAKAI MODEL: {model_name}")
     bot.infinity_polling(skip_pending=True)
