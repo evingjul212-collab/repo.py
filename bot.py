@@ -13,7 +13,6 @@ DB_PATH = '/data/story_bot.db' if os.path.exists('/data') else 'story_bot.db'
 
 # Inisialisasi Groq
 client = Groq(api_key=GROQ_API_KEY)
-# Model Llama 3.3 70B adalah yang terpintar dan tercepat di Groq saat ini
 MODEL_NAME = "llama-3.3-70b-specdec"
 
 # --- DATABASE LOGIC ---
@@ -43,8 +42,7 @@ def save_user_data(user_id, history, genre):
     conn.commit()
     conn.close()
 
-# --- LOGIKA CERITA (MESIN GROQ) ---
-
+# --- LOGIKA CERITA ---
 def split_text(text, limit=4000):
     return [text[i:i+limit] for i in range(0, len(text), limit)]
 
@@ -52,105 +50,67 @@ async def jalankan_logika_cerita(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
     history, genre = get_user_data(user_id)
     chat_id = update.effective_chat.id
-    
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
     try:
-        # Format pesan untuk Groq (System -> History -> User)
-        messages = [
-            {
-                "role": "system", 
-                "content": (
-                    f"Kamu adalah penulis cerita interaktif profesional dengan genre {genre}. "
-                    "Gunakan Bahasa Indonesia yang menarik. JANGAN menambah karakter baru tanpa izin. "
-                    "Tulis kelanjutan cerita secara logis. DI AKHIR PESAN, WAJIB BERIKAN: "
-                    "Opsi A: [pilihan alur 1], Opsi B: [pilihan alur 2]."
-                )
-            }
-        ]
-        
-        # Masukkan history (Ambil 6 turn terakhir agar hemat token dan memori)
+        messages = [{"role": "system", "content": f"Kamu penulis cerita {genre} profesional. Gunakan Bahasa Indonesia. JANGAN tambah karakter baru tanpa izin. Di akhir, berikan Opsi A dan B."}]
         for h in history[-6:]:
             messages.append({"role": h["role"], "content": h["content"]})
-        
-        # Masukkan input user terbaru
         messages.append({"role": "user", "content": teks_input})
 
-        # Panggil API Groq
-        completion = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            temperature=0.8,
-            max_tokens=1000
-        )
-        
-        response_text = completion.choices[0].message.content
+        completion = client.chat.completions.create(model=MODEL_NAME, messages=messages, temperature=0.8, max_tokens=1000)
+        res = completion.choices[0].message.content
 
-        # Update History di Database
         history.append({"role": "user", "content": teks_input})
-        history.append({"role": "assistant", "content": response_text})
+        history.append({"role": "assistant", "content": res})
         save_user_data(user_id, history[-10:], genre)
 
-        # Siapkan Tombol
-        keyboard = [
-            [InlineKeyboardButton("Opsi A 💡", callback_data="A"),
-             InlineKeyboardButton("Opsi B 🎭", callback_data="B")],
-            [InlineKeyboardButton("Opsi C (Ketik Sendiri) ✏️", callback_data="C")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        kbd = [[InlineKeyboardButton("Opsi A 💡", callback_data="A"), InlineKeyboardButton("Opsi B 🎭", callback_data="B")],
+               [InlineKeyboardButton("Opsi C (Ketik) ✏️", callback_data="C")]]
         
-        # Kirim pesan
-        parts = split_text(response_text)
-        for i, part in enumerate(parts):
-            if i == len(parts) - 1:
-                await context.bot.send_message(chat_id=chat_id, text=part, reply_markup=reply_markup)
-            else:
-                await context.bot.send_message(chat_id=chat_id, text=part)
-                
+        for i, p in enumerate(split_text(res)):
+            m = InlineKeyboardMarkup(kbd) if i == len(split_text(res))-1 else None
+            await context.bot.send_message(chat_id=chat_id, text=p, reply_markup=m)
     except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ Error Groq: {str(e)}")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
 
-# --- HANDLER BOT ---
+# --- HANDLERS ---
+async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    await u.message.reply_text("📖 **Story Bot Aktif!**\nKetik tema cerita atau gunakan `/genre`.")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📖 **Selamat Datang di Story Bot (Powered by Groq)!**\n\n"
-        "Gunakan `/genre` untuk pilih tema, atau langsung ketik awal ceritanya.\n"
-        "Gunakan `/reset` jika ingin menghapus ingatan bot."
-    )
+async def set_genre(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    kbd = [[InlineKeyboardButton("Horor 👻", callback_data="g_Horor"), InlineKeyboardButton("Fantasi 🧙", callback_data="g_Fantasi")],
+           [InlineKeyboardButton("Sci-Fi 🚀", callback_data="g_Sci-Fi"), InlineKeyboardButton("Romance ❤️", callback_data="g_Romance")]]
+    await u.message.reply_text("Pilih Genre:", reply_markup=InlineKeyboardMarkup(kbd))
 
-async def set_genre(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Horor 👻", callback_data="g_Horor"),
-         InlineKeyboardButton("Fantasi 🧙", callback_data="g_Fantasi")],
-        [InlineKeyboardButton("Sci-Fi 🚀", callback_data="g_Sci-Fi"),
-         InlineKeyboardButton("Romance ❤️", callback_data="g_Romance")]
-    ]
-    await update.message.reply_text("Pilih Genre Ceritamu:", reply_markup=InlineKeyboardMarkup(keyboard))
+async def reset_story(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    save_user_data(u.effective_user.id, [], "Umum")
+    await u.message.reply_text("🧹 **Reset Berhasil!**")
 
-async def reset_story(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    save_user_data(user_id, [], "Umum")
-    await update.message.reply_text("🧹 **Ingatan dihapus!** Silahkan mulai cerita baru.")
+async def handle_message(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    await jalankan_logika_cerita(u, c, u.message.text)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await jalankan_logika_cerita(update, context, update.message.text)
-
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data
-    user_id = query.from_user.id
-    await query.answer()
-
-    if data.startswith("g_"):
-        new_genre = data.split("_")[1]
-        history, _ = get_user_data(user_id)
-        save_user_data(user_id, history, new_genre)
-        await query.edit_message_text(f"✅ Genre diubah ke: **{new_genre}**.")
-    
-    elif data == "C":
-        await query.message.reply_text("Silahkan ketik alur ceritamu sendiri (Opsi C) sekarang!")
-    
+async def callback_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query
+    await q.answer()
+    if q.data.startswith("g_"):
+        new_g = q.data.split("_")[1]
+        h, _ = get_user_data(q.from_user.id)
+        save_user_data(q.from_user.id, h, new_g)
+        await q.edit_message_text(f"✅ Genre: {new_g}")
+    elif q.data == "C":
+        await q.message.reply_text("Ketik alurmu sendiri!")
     else:
-        await query.edit_message_reply_markup(reply_markup=None)
-        await query.message.reply_text(f"Mem
+        await q.edit_message_reply_markup(None)
+        await q.message.reply_text(f"Memilih Opsi {q.data}...")
+        await jalankan_logika_cerita(u, c, f"Saya pilih Opsi {q.data}. Lanjutkan.")
+
+if __name__ == "__main__":
+    init_db()
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("genre", set_genre))
+    app.add_handler(CommandHandler("reset", reset_story))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.run_polling()
