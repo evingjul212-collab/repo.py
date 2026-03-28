@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import json
+import logging
 from groq import Groq
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -28,9 +29,7 @@ def get_user_data(user_id):
     c.execute("SELECT chat_history, genre FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
     conn.close()
-    if row:
-        return json.loads(row[0]), row[1]
-    return [], "Umum"
+    return (json.loads(row[0]), row[1]) if row else ([], "Umum")
 
 def save_user_data(user_id, history, genre):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -40,97 +39,91 @@ def save_user_data(user_id, history, genre):
     conn.commit()
     conn.close()
 
-# --- LOGIKA HAPUS TURN TERAKHIR (UNTUK RETRY) ---
-def hapus_turn_terakhir(user_id):
-    history, genre = get_user_data(user_id)
-    if len(history) >= 2:
-        # Hapus 2 pesan terakhir (Pesan User & Jawaban AI yang salah)
-        history = history[:-2]
-        save_user_data(user_id, history, genre)
-        return True
-    return False
-
-# --- LOGIKA CERITA ---
+# --- LOGIKA MESIN CERITA ---
 def split_text(text, limit=4000):
     return [text[i:i+limit] for i in range(0, len(text), limit)]
 
-async def jalankan_logika_cerita(update: Update, context: ContextTypes.DEFAULT_TYPE, teks_input: str):
+async def jalankan_logika_cerita(update: Update, context: ContextTypes.DEFAULT_TYPE, teks_input: str, is_retry=False):
     user_id = update.effective_user.id
-    history, genre = get_user_data(user_id)
     chat_id = update.effective_chat.id
+    history, genre = get_user_data(user_id)
+    
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
     try:
         messages = [{"role": "system", "content": f"Kamu penulis cerita {genre} profesional. Gunakan Bahasa Indonesia. JANGAN tambah karakter baru tanpa izin. Di akhir, berikan Opsi A dan B."}]
         for h in history[-6:]:
             messages.append({"role": h["role"], "content": h["content"]})
-        messages.append({"role": "user", "content": teks_input})
-
+        
+        # Jika bukan retry, masukkan input baru ke pesan
+        if not is_retry:
+            messages.append({"role": "user", "content": teks_input})
+        
         completion = client.chat.completions.create(model=MODEL_NAME, messages=messages, temperature=0.8, max_tokens=1000, stream=False)
         res = completion.choices[0].message.content
 
-        history.append({"role": "user", "content": teks_input})
+        # Simpan ke history hanya jika bukan sedang 'memperbaiki' (is_retry ditangani di callback)
+        if not is_retry:
+            history.append({"role": "user", "content": teks_input})
+        
         history.append({"role": "assistant", "content": res})
         save_user_data(user_id, history[-10:], genre)
 
-        # TAMBAHKAN TOMBOL RETRY (🔄)
+        # Keyboard Komplit
         kbd = [
             [InlineKeyboardButton("Opsi A 💡", callback_data="A"), InlineKeyboardButton("Opsi B 🎭", callback_data="B")],
-            [InlineKeyboardButton("Opsi C (Ketik) ✏️", callback_data="C"), InlineKeyboardButton("Ulangi Alur 🔄", callback_data="RETRY")]
+            [InlineKeyboardButton("Opsi C (Ketik) ✏️", callback_data="C"), InlineKeyboardButton("Ulangi Alur 🔄", callback_data="RETRY")],
+            [InlineKeyboardButton("⏪ Ganti Pilihan (Undo)", callback_data="UNDO")]
         ]
         
         parts = split_text(res)
-        for i, part in enumerate(parts):
+        for i, p in enumerate(parts):
             m = InlineKeyboardMarkup(kbd) if i == len(parts)-1 else None
-            await context.bot.send_message(chat_id=chat_id, text=part, reply_markup=m)
+            await context.bot.send_message(chat_id=chat_id, text=p, reply_markup=m)
+            
     except Exception as e:
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {str(e)}")
 
 # --- HANDLERS ---
 async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    await u.message.reply_text("📖 **Story Bot Aktif!**\nKetik awal cerita atau pilih `/genre`.")
+    await u.message.reply_text("📖 **Story Bot Komplit Aktif!**\nKetik awal cerita atau pilih `/genre`.")
 
 async def set_genre(u: Update, c: ContextTypes.DEFAULT_TYPE):
     kbd = [[InlineKeyboardButton("Horor 👻", callback_data="g_Horor"), InlineKeyboardButton("Fantasi 🧙", callback_data="g_Fantasi")],
            [InlineKeyboardButton("Sci-Fi 🚀", callback_data="g_Sci-Fi"), InlineKeyboardButton("Romance ❤️", callback_data="g_Romance")]]
     await u.message.reply_text("Pilih Genre:", reply_markup=InlineKeyboardMarkup(kbd))
 
-async def handle_message(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    await jalankan_logika_cerita(u, c, u.message.text)
-
 async def callback_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
     q = u.callback_query
     uid = q.from_user.id
     await q.answer()
     
+    history, genre = get_user_data(uid)
+
     if q.data.startswith("g_"):
         new_g = q.data.split("_")[1]
-        h, _ = get_user_data(uid)
-        save_user_data(uid, h, new_g)
-        await q.edit_message_text(f"✅ Genre: {new_g}")
+        save_user_data(uid, history, new_g)
+        await q.edit_message_text(f"✅ Genre diubah ke: {new_g}")
     
     elif q.data == "C":
-        await q.message.reply_text("Ketik alurmu sendiri!")
-        
+        await q.message.reply_text("Silahkan ketik alur ceritamu sendiri!")
+
     elif q.data == "RETRY":
-        # Ambil history sebelum dihapus
-        history, _ = get_user_data(uid)
-        if history:
-            # Cari input terakhir user (biasanya di posisi ke-2 dari belakang)
-            last_user_prompt = None
-            for h in reversed(history):
-                if h["role"] == "user":
-                    last_user_prompt = h["content"]
-                    break
-            
-            if last_user_prompt:
-                # 1. Hapus memori yang salah
-                hapus_turn_terakhir(uid)
-                # 2. Kasih tanda lagi loading
-                await q.edit_message_text("🔄 *Menghapus alur tadi dan menulis ulang...*", parse_mode="Markdown")
-                # 3. Jalankan lagi dengan prompt yang sama
-                await jalankan_logika_cerita(u, c, last_user_prompt)
-    
+        if len(history) >= 2:
+            last_prompt = history[-2]["content"] # Ambil input user sebelum AI jawab
+            save_user_data(uid, history[:-2], genre) # Hapus pasangan pesan terakhir
+            await q.edit_message_text("🔄 *Menulis ulang adegan terakhir...*")
+            await jalankan_logika_cerita(u, c, last_prompt)
+        else:
+            await q.message.reply_text("Belum ada cerita untuk diulangi.")
+
+    elif q.data == "UNDO":
+        if len(history) >= 2:
+            save_user_data(uid, history[:-2], genre)
+            await q.edit_message_text("⏪ **Pilihan dibatalkan.** Silahkan pilih ulang atau ketik alur baru.")
+        else:
+            await q.message.reply_text("Sudah di awal cerita!")
+
     else:
         await q.edit_message_reply_markup(None)
         await q.message.reply_text(f"Memilih Opsi {q.data}...")
@@ -141,6 +134,7 @@ if __name__ == "__main__":
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("genre", set_genre))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: jalankan_logika_cerita(u, c, u.message.text)))
     app.add_handler(CallbackQueryHandler(callback_handler))
+    print("Bot Story Bossku Berhasil Jalan!")
     app.run_polling()
