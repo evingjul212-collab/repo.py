@@ -1,3 +1,4 @@
+import os
 import logging
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.ext import (
@@ -9,10 +10,12 @@ from telegram.ext import (
     filters,
 )
 
-# Setup logging
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+# 1. Setup Logging untuk memantau jika ada error
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
-# Definisi tahapan percakapan
+# 2. Definisi tahapan percakapan (State)
 GENDER, HAIR_STYLE, HAIR_COLOR, CLOTHES, BACKGROUND, RATIO = range(6)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -25,7 +28,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['gender'] = update.message.text
-    await update.message.reply_text("Apa gaya rambutnya? (contoh: Undercut, Long wavy, Hijab, Bald)", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(
+        "Apa gaya rambutnya? (contoh: Undercut, Long wavy, Hijab, Bald)", 
+        reply_markup=ReplyKeyboardRemove()
+    )
     return HAIR_STYLE
 
 async def get_hair_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,7 +62,7 @@ async def generate_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['ratio'] = update.message.text
     user = context.user_data
     
-    # Merangkai Prompt Akhir
+    # 3. Merangkai semua input menjadi satu prompt utuh
     final_prompt = (
         f"A professional photo of a {user['gender']} with {user['hair_color']} {user['hair_style']} hair, "
         f"wearing {user['clothes']}, standing in {user['background']}, "
@@ -75,9 +81,16 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
-    # Masukkan Token Bot kamu di sini
-    application = Application.builder().token("ISI_TOKEN_BOT_MU_DISINI").build()
+    # 4. Mengambil Token dari Environment Variable Railway
+    token = os.getenv("TELEGRAM_TOKEN")
+    
+    if not token:
+        print("Error: Variabel TELEGRAM_TOKEN tidak ditemukan!")
+        return
 
+    application = Application.builder().token(token).build()
+
+    # Setup alur percakapan
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -92,6 +105,8 @@ def main():
     )
 
     application.add_handler(conv_handler)
+    
+    # Menjalankan bot
     application.run_polling()
 
 if __name__ == "__main__":
