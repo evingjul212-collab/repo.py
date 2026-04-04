@@ -1,3 +1,2 @@
 python-telegram-bot
-google-genai
-python-dotenv
+google-generativeai
