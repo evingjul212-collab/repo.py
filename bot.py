@@ -1,40 +1,37 @@
-import os, logging
-import google.generativeai as genai
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
-from telegram.ext import Application, CommandHandler, ConversationHandler, MessageHandler, filters
+import httpx
+import urllib.parse
 
-# Setup AI - Ganti model_name sesuai yang Boss pakai (2.5)
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash') # <-- Edit di sini Boss!
-
-GENDER, HAIR, COLOR, CLOTHES, BACK, RATIO = range(6)
-
-async def handle_vision(update, context):
-    msg = await update.message.reply_text("🔍 AI Vision sedang bekerja...")
-    try:
-        photo = await update.message.photo[-1].get_file()
-        img_bytes = await photo.download_as_bytearray()
-        # Prompt sesuai standar "Professional Engineer" yang Boss mau
-        resp = model.generate_content([
-            "Professional Prompt Engineer: Describe this image for AI Generator in 1 detailed paragraph.",
-            {"mime_type": "image/jpeg", "data": bytes(img_bytes)}
-        ])
-        await msg.edit_text(f"✅ **AI Result:**\n\n`{resp.text}`", parse_mode="Markdown")
-    except Exception as e:
-        await msg.edit_text(f"Error: {e}")
-
-# ... (Sisa alur Manual tetap sama seperti sebelumnya) ...
-
-def main():
-    app = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).build()
+async def draw_and_send(update, prompt_text):
+    # 1. Kasih tau user kalau lagi proses gambar
+    status_msg = await update.message.reply_text("🎨 Sedang melukis gambar... Tunggu bentar Boss.")
     
-    # Handler Foto (Otomatis)
-    app.add_handler(MessageHandler(filters.PHOTO, handle_vision))
+    # 2. Encode prompt agar aman masuk ke URL (spasi jadi %20, dll)
+    encoded_prompt = urllib.parse.quote(prompt_text)
     
-    # Handler Manual (Step-by-step)
-    # (Pastikan Entry Point-nya cocok dengan teks di tombol Bar Bawah Boss)
-    
-    app.run_polling()
+    # Boss bisa atur model (flux, turbo, dll) & ukuran di sini
+    # Seed=random biar hasilnya selalu beda tiap kali dibuat
+    import random
+    seed = random.randint(0, 99999)
+    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed={seed}&model=flux&nologo=true"
 
-if __name__ == "__main__":
-    main()
+    async with httpx.AsyncClient() as client:
+        try:
+            # Cek dulu apakah link-nya valid (timeout 40 detik karena generate gambar butuh waktu)
+            response = await client.get(image_url, timeout=40.0)
+            
+            if response.status_code == 200:
+                # Kirim fotonya ke Telegram
+                await update.message.reply_photo(
+                    photo=image_url,
+                    caption="✅ **Ini Hasil Lukisannya Boss!**",
+                    parse_mode="Markdown"
+                )
+                await status_msg.delete()
+            else:
+                await status_msg.edit_text("❌ Gagal melukis, server Pollinations lagi penuh Boss.")
+        except Exception as e:
+            await status_msg.edit_text(f"⚠️ Error pas nggambar: {e}")
+
+# CARA PAKAI:
+# Di dalam fungsi handle_vision atau generate_manual_prompt, 
+# tinggal panggil: await draw_and_send(update, prompt_result)
