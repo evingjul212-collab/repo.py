@@ -15,7 +15,7 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # Pakai Library google-genai terbaru
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_NAME = 'gemini-2.5-flash' # Boss ganti ke 'gemini-2.5-flash' jika sudah ready di region Boss
+MODEL_NAME = 'gemini-2.0-flash' # Boss ganti ke 'gemini-2.5-flash' jika sudah ready di region Boss
 
 # State untuk Conversation Manual
 GENDER, HAIR, COLOR, CLOTHES, BACK, RATIO = range(6)
@@ -129,4 +129,30 @@ async def final_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- MAIN RUNNER ---
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
-    if not token:
+    if not token: return
+    
+    app = Application.builder().token(token).build()
+
+    conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^✍️ Buat Manual$"), manual_start)],
+        states={
+            GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gender)],
+            HAIR: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_hair)],
+            COLOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_color)],
+            CLOTHES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_clothes)],
+            BACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_back)],
+            RATIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, final_manual)],
+        },
+        fallbacks=[CommandHandler("start", start), MessageHandler(filters.Regex("^🔄 Reset Bot$"), start)]
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.Regex("^📸 Kirim Gambar$"), lambda u,c: u.message.reply_text("Silakan kirim foto Boss!")))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_vision))
+    app.add_handler(conv)
+    
+    print("Bot Gacor Ready Boss! 🚀")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
