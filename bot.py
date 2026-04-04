@@ -13,7 +13,7 @@ from telegram.ext import (
 # 1. SETUP
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_NAME = 'gemini-2.0-flash' # Boss bisa ganti ke 2.5 sesuai pengalaman Boss
+MODEL_NAME = 'gemini-2.5-flash' # Boss bisa ganti ke 2.5 sesuai pengalaman Boss
 
 GENDER, HAIR, COLOR, CLOTHES, BACK, RATIO = range(6)
 
