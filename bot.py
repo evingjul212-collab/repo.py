@@ -18,7 +18,7 @@ logging.basicConfig(
 
 # Konfigurasi Gemini API (Pastikan GEMINI_API_KEY ada di Railway Variables)
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-vision_model = genai.GenerativeModel('gemini-1.5-flash')
+vision_model = genai.GenerativeModel('gemini-2.5-flash')
 
 # 2. DEFINISI STATE UNTUK PERCAKAPAN MANUAL
 GENDER, HAIR_STYLE, HAIR_COLOR, CLOTHES, BACKGROUND, RATIO = range(6)
