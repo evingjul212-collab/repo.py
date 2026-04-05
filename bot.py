@@ -5,16 +5,18 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from google import genai
 from google.genai import types
 import io
+from datetime import datetime
 
 # ==========================================
-# KODE: ROMKOM ENGINE V.40.0 (REPLY KEYBOARD UI)
-# Deskripsi: FULL MANUAL CHARACTER CONTROL
+# KODE: ROMKOM ENGINE V.50.0 (FINAL PERFECTED)
+# Deskripsi: UI REWORK + GEMINI 2.0 + IMPORT/EXPORT FIX
 # ==========================================
 
 # --- CONFIG ---
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
+# Menggunakan SDK Google Gemini Terbaru
 client = genai.Client(api_key=GEMINI_KEY)
 SYSTEM_INSTRUCTION = "Kamu AI GM RomCom 21+. RESPON WAJIB 2 PARAGRAF. Gaya Indonesia kasual, sensual, puitis. ANTI-REPETISI."
 
@@ -33,7 +35,7 @@ def load_db():
 
 def save_db(data):
     with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+        json.dump(data, f, indent=4, ensure_ascii=False, default=str)
 
 def get_user_data(chat_id):
     db = load_db()
@@ -64,7 +66,7 @@ def setup_bot_commands():
     # Ini Menu Command (Tombol biru / )
     commands = [
         BotCommand("karakter", "Pilih karakter untuk interaksi"),
-        BotCommand("lanjut_otomatis", "Lanjutkan cerita otomatis oleh sistem")
+        BotCommand("lanjut_otomatis", "Lanjutkan cerita otomatis oleh AI")
     ]
     bot.set_my_commands(commands)
 
@@ -101,7 +103,8 @@ def generate_ai_response(chat_id, prompt):
     )
 
     try:
-        response = client.models.generate_content(model="gemini-1.5-flash", contents=contents, config=config)
+        # PENGGUNAAN GEMINI 2.0 FLASH (Lebih cerdas & anti error 404)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=contents, config=config)
         text_response = response.text
         
         add_history(chat_id, "user", full_prompt)
@@ -144,6 +147,7 @@ def send_welcome(message):
 
 def process_mc_name(message):
     chat_id = message.chat.id
+    # Cegah format HTML crash dengan replace tag
     mc_name = message.text.strip().replace("<", "").replace(">", "")
     update_user_data(chat_id, "mc_name", mc_name)
     bot.send_message(chat_id, f"✅ Karakter Utama ditetapkan sebagai: <b>{mc_name}</b>.\n\nSilakan pilih menu di bawah layar 👇", parse_mode="HTML", reply_markup=get_main_menu())
@@ -197,20 +201,24 @@ def reset_data(message):
 def export_story(message):
     chat_id = message.chat.id
     user_data = get_user_data(chat_id)
-    json_data = json.dumps(user_data, indent=4, ensure_ascii=False)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name = f"story_{chat_id}_{timestamp}.json"
+    
+    json_data = json.dumps(user_data, indent=4, ensure_ascii=False, default=str)
     file_stream = io.BytesIO(json_data.encode('utf-8'))
-    file_stream.name = f"story_{chat_id}.json"
-    bot.send_document(chat_id, file_stream, caption="📂 Ini file backup cerita Anda.")
+    file_stream.name = file_name
+    bot.send_document(chat_id, file_stream, caption="📂 File backup cerita Anda.")
 
 @bot.message_handler(func=lambda message: message.text == "📂 Import Cerita")
 def import_story(message):
-    msg = bot.reply_to(message, "Silakan kirimkan file .json yang pernah di-export:")
+    msg = bot.reply_to(message, "Silakan kirimkan file .json yang pernah di-export:", reply_markup=ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_import_file)
 
 def process_import_file(message):
     chat_id = message.chat.id
     if not message.document or not message.document.file_name.endswith('.json'):
-        bot.send_message(chat_id, "❌ File tidak valid. Batal import.")
+        bot.send_message(chat_id, "❌ File tidak valid. Harus format .json! Batal import.", reply_markup=get_main_menu())
         return
 
     try:
@@ -218,15 +226,21 @@ def process_import_file(message):
         downloaded_file = bot.download_file(file_info.file_path)
         imported_data = json.loads(downloaded_file.decode('utf-8'))
         
+        # Validasi kelengkapan JSON
+        if not isinstance(imported_data, dict) or not all(k in imported_data for k in ("mc_name", "characters", "history", "last_story")):
+            bot.send_message(chat_id, "❌ File JSON rusak atau bukan file cerita dari bot ini.", reply_markup=get_main_menu())
+            return
+        
         db = load_db()
         db[str(chat_id)] = imported_data
         save_db(db)
         
-        bot.send_message(chat_id, "✅ Cerita berhasil di-import!\nMelanjutkan dari adegan terakhir...")
-        last_story = imported_data.get("last_story", "Tidak ada riwayat cerita.")
-        bot.send_message(chat_id, last_story, reply_markup=get_interactive_menu(chat_id))
+        bot.send_message(chat_id, "✅ Cerita berhasil di-import!\nMelanjutkan dari adegan terakhir...", reply_markup=get_main_menu())
+        last_story = imported_data.get("last_story", "")
+        if last_story:
+            bot.send_message(chat_id, last_story, reply_markup=get_interactive_menu(chat_id))
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Gagal membaca file: {str(e)}")
+        bot.send_message(chat_id, f"❌ Gagal membaca file: {str(e)}", reply_markup=get_main_menu())
 
 
 # --- MENU COMMAND (TOMBOL BIRU / ) HANDLERS ---
@@ -254,17 +268,17 @@ def handle_callback(call):
     bot.answer_callback_query(call.id)
 
     if action == "act_mc":
-        msg = bot.send_message(chat_id, f"Apa reaksi/tindakan <b>{user_data['mc_name']}</b>?", parse_mode="HTML")
+        msg = bot.send_message(chat_id, f"Apa reaksi/tindakan <b>{user_data['mc_name']}</b>?", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         bot.register_next_step_handler(msg, process_action, f"{user_data['mc_name']} melakukan/mengatakan:")
         
     elif action.startswith("act_char_"):
         idx = int(action.split("_")[-1])
         char_name = user_data['characters'][idx]
-        msg = bot.send_message(chat_id, f"Apa reaksi/tindakan <b>{char_name}</b>?", parse_mode="HTML")
+        msg = bot.send_message(chat_id, f"Apa reaksi/tindakan <b>{char_name}</b>?", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         bot.register_next_step_handler(msg, process_action, f"{char_name} melakukan/mengatakan:")
 
     elif action == "act_narrator":
-        msg = bot.send_message(chat_id, "👁 <b>Narator:</b> Apa yang terjadi selanjutnya dalam cerita?", parse_mode="HTML")
+        msg = bot.send_message(chat_id, "👁 <b>Narator:</b> Apa yang terjadi selanjutnya dalam cerita?", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         bot.register_next_step_handler(msg, process_action, "Narator: ")
 
     elif action == "act_auto":
@@ -275,7 +289,9 @@ def handle_callback(call):
 def process_action(message, prefix_prompt):
     chat_id = message.chat.id
     user_input = message.text
-    bot.send_message(chat_id, "⏳ <b>Menyusun cerita...</b>", parse_mode="HTML")
+    
+    # Setelah mengetik, menu bawah dimunculkan lagi
+    bot.send_message(chat_id, "⏳ <b>Menyusun cerita...</b>", parse_mode="HTML", reply_markup=get_main_menu())
     prompt = f"{prefix_prompt} {user_input}. Lanjutkan cerita berdasarkan tindakan ini dalam 2 paragraf."
     story = generate_ai_response(chat_id, prompt)
     bot.send_message(chat_id, story, reply_markup=get_interactive_menu(chat_id))
@@ -284,5 +300,5 @@ def process_action(message, prefix_prompt):
 # RUN BOT
 # ==========================================
 if __name__ == "__main__":
-    print("🤖 Bot RomCom berjalan (Reply Keyboard UI)...")
+    print("🤖 Bot RomCom V.50 Berjalan Sempurna...")
     bot.infinity_polling()
