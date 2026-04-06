@@ -1,48 +1,26 @@
-import os
-import json
-import telebot
-import io
-from telebot.types import (
-    InlineKeyboardMarkup, 
-    InlineKeyboardButton, 
-    BotCommand, 
-    ReplyKeyboardMarkup, 
-    KeyboardButton, 
-    ReplyKeyboardRemove
-)
+import os, json, telebot, io
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from google import genai
 from google.genai import types
 
-# ==========================================
-# 1. KONFIGURASI
-# ==========================================
+# --- CONFIG ---
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-
 client = genai.Client(api_key=GEMINI_KEY)
-SYSTEM_INSTRUCTION = (
-    "Kamu AI GM RomCom 21+. RESPON WAJIB 2 PARAGRAF (Minimal 100 kata). "
-    "Gaya Indonesia kasual, sensual, puitis. "
-    "Patuhi detail karakter dan alur cerita agar konsisten."
-)
-
 bot = telebot.TeleBot(BOT_TOKEN)
 DB_FILE = "experimental_db.json"
+SYSTEM_INSTRUCTION = "Kamu AI GM RomCom 21+. RESPON WAJIB 2 PARAGRAF. Gaya Indonesia kasual, sensual, puitis. ANTI-REPETISI."
 
-# ==========================================
-# 2. DATABASE HANDLER
-# ==========================================
+# --- DB HANDLER ---
 def load_db():
     if os.path.exists(DB_FILE):
         try:
-            with open(DB_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception: return {}
+            with open(DB_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        except: return {}
     return {}
 
 def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4, ensure_ascii=False)
 
 def get_user_data(chat_id):
     db = load_db()
@@ -52,9 +30,7 @@ def get_user_data(chat_id):
         save_db(db)
     return db[cid]
 
-# ==========================================
-# 3. KEYBOARD GENERATOR
-# ==========================================
+# --- UI GENERATOR ---
 def get_main_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(KeyboardButton("➕ Cerita Baru"), KeyboardButton("📂 Import Cerita"))
@@ -65,228 +41,118 @@ def get_main_menu():
 def get_interactive_menu(chat_id):
     data = get_user_data(chat_id)
     markup = InlineKeyboardMarkup(row_width=2)
-    if data['mc']['name']:
-        markup.add(InlineKeyboardButton(f"🗣 {data['mc']['name']}", callback_data="act_mc"))
+    if data['mc']['name']: markup.add(InlineKeyboardButton(f"🗣 {data['mc']['name']}", callback_data="act_mc"))
     for idx, char in enumerate(data['characters']):
         markup.add(InlineKeyboardButton(f"👤 {char['name']}", callback_data=f"act_char_{idx}"))
-    markup.add(
-        InlineKeyboardButton("⏩ Lanjut Otomatis", callback_data="act_auto"),
-        InlineKeyboardButton("👁 Narator", callback_data="act_narrator")
-    )
+    markup.add(InlineKeyboardButton("⏩ Lanjut Otomatis", callback_data="act_auto"), InlineKeyboardButton("👁 Narator", callback_data="act_narrator"))
     markup.add(InlineKeyboardButton("🔄 Ulang Respon (Regen)", callback_data="act_regen"))
     return markup
 
-# ==========================================
-# 4. AI ENGINE (DENGAN AUTO-SUMMARY)
-# ==========================================
-def generate_ai_response(chat_id, prompt, is_regen=False):
-    db = load_db()
-    cid = str(chat_id)
-    data = db[cid]
-    
-    if is_regen and len(data['history']) >= 2:
-        data['history'] = data['history'][:-2]
+# --- CORE LOGIC ---
+def show_current_status(chat_id):
+    data = get_user_data(chat_id)
+    char_list = ", ".join([c['name'] for c in data['characters']]) if data['characters'] else "-"
+    text = (f"📖 <b>STATUS CERITA DIMUAT</b>\n\n"
+            f"<b>MC:</b> {data['mc']['name']} ({data['mc']['desc']})\n"
+            f"<b>Tokoh:</b> {char_list}\n"
+            f"<b>Alur:</b> {data.get('summary', 'Baru dimulai.')}\n\n"
+            f"<b>ADEGAN TERAKHIR:</b>\n{data.get('last_story', 'Silakan mulai cerita baru.')}")
+    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=get_interactive_menu(chat_id))
+    bot.send_message(chat_id, "👇 Pilih aksi atau gunakan menu di bawah:", reply_markup=get_main_menu())
 
-    # Gabungkan Info Karakter + Summary Alur
+def generate_ai_response(chat_id, prompt, is_regen=False):
+    db = load_db(); cid = str(chat_id); data = db[cid]
+    if is_regen and len(data['history']) >= 2: data['history'] = data['history'][:-2]
+    
     chars_info = "\n".join([f"- {c['name']}: {c['desc']}" for c in data['characters']])
-    lore_context = f"STATUS CERITA: {data.get('summary', 'Baru dimulai.')}\n"
-    context = (
-        f"MC: {data['mc']['name']} ({data['mc']['desc']})\n"
-        f"NPC:\n{chars_info}\n"
-        f"{lore_context}"
-        f"PERINTAH: Tulis minimal 2 paragraf deskriptif puitis.\n"
-    )
+    context = f"MC: {data['mc']['name']} ({data['mc']['desc']})\nNPC:\n{chars_info}\nAlur: {data.get('summary','')}\n"
     
-    contents = []
-    # Ambil 6 history terakhir
-    for msg in data['history'][-6:]:
-        contents.append(types.Content(role=msg["role"], parts=[types.Part.from_text(text=msg["parts"][0])]))
-    
-    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=context + prompt)]))
+    contents = [types.Content(role=m["role"], parts=[types.Part.from_text(text=m["parts"][0])]) for m in data['history'][-6:]]
+    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=context + "PERINTAH: Tulis 2 paragraf deskriptif. " + prompt)]))
 
     try:
-        config = types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.9)
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=contents, config=config)
-        text = response.text
-        
-        data["history"].append({"role": "user", "parts": [prompt]})
-        data["history"].append({"role": "model", "parts": [text]})
+        res = client.models.generate_content(model="gemini-2.0-flash", contents=contents, config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.9))
+        text = res.text
+        data["history"].extend([{"role":"user", "parts":[prompt]}, {"role":"model", "parts":[text]}])
         data["last_story"] = text
-        
-        # --- LOGIKA AUTO SUMMARY (Setiap 10 pesan) ---
         if len(data["history"]) % 10 == 0:
-            summary_prompt = f"Ringkas inti alur cerita ini dalam 1 paragraf pendek saja untuk pengingat: {text}"
-            res_sum = client.models.generate_content(model="gemini-2.0-flash", contents=[summary_prompt])
-            data["summary"] = res_sum.text
-            # Opsional: Potong history agar file export tidak meledak
-            if len(data["history"]) > 20:
-                data["history"] = data["history"][-10:]
-
-        db[cid] = data
-        save_db(db)
+            s_res = client.models.generate_content(model="gemini-2.0-flash", contents=[f"Ringkas alur ini jadi 1 paragraf: {text}"])
+            data["summary"] = s_res.text
+        db[cid] = data; save_db(db)
         return text
-    except Exception as e:
-        return f"⚠️ Error AI: {str(e)}"
+    except Exception as e: return f"⚠️ Error: {str(e)}"
 
-# ==========================================
-# 5. HANDLERS (START & MC SETUP)
-# ==========================================
+# --- HANDLERS ---
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
-    msg = bot.send_message(message.chat.id, "🌟 <b>ROMKOM V.6.1</b>\n\nNama Karakter Utamamu (MC):", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    bot.register_next_step_handler(msg, process_mc_name)
+    msg = bot.send_message(message.chat.id, "🌟 <b>ROMKOM V.6.2</b>\nNama MC kamu?", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.send_message(m.chat.id, f"Detail/Sifat {m.text}:"), process_mc_final, m.text))
 
-def process_mc_name(message):
-    name = message.text.strip()
-    msg = bot.send_message(message.chat.id, f"Detail/Sifat/Fisik <b>{name}</b>:", parse_mode="HTML")
-    bot.register_next_step_handler(msg, process_mc_desc, name)
+def process_mc_final(message, name):
+    db = load_db(); cid = str(message.chat.id)
+    db[cid] = {"mc": {"name": name, "desc": message.text}, "characters": [], "history": [], "last_story": "", "summary": ""}
+    save_db(db); bot.send_message(message.chat.id, f"✅ MC {name} Siap!", reply_markup=get_main_menu())
 
-def process_mc_desc(message, name):
-    desc = message.text.strip()
-    db = load_db()
-    cid = str(message.chat.id)
-    db[cid] = {"mc": {"name": name, "desc": desc}, "characters": [], "history": [], "last_story": "", "summary": ""}
-    save_db(db)
-    bot.send_message(message.chat.id, f"✅ MC <b>{name}</b> Siap!", parse_mode="HTML", reply_markup=get_main_menu())
+@bot.message_handler(func=lambda m: m.text == "👤 Tambah Karakter")
+def cmd_add_char(message):
+    msg = bot.send_message(message.chat.id, "Nama NPC baru?", reply_markup=ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.send_message(m.chat.id, f"Detail/Sifat {m.text}:"), process_npc_final, m.text))
 
-# ==========================================
-# 6. IMPORT (FIXED - SHOW LAST STORY)
-# ==========================================
+def process_npc_final(message, name):
+    db = load_db(); cid = str(message.chat.id)
+    db[cid]["characters"].append({"name": name, "desc": message.text})
+    save_db(db); bot.send_message(message.chat.id, f"✅ {name} masuk!", reply_markup=get_main_menu())
+
 @bot.message_handler(func=lambda m: m.text == "📂 Import Cerita")
 def cmd_import(message):
-    msg = bot.send_message(message.chat.id, "📤 Kirim file .json backup kamu:", reply_markup=ReplyKeyboardRemove())
+    msg = bot.send_message(message.chat.id, "Kirim file .json backup:", reply_markup=ReplyKeyboardRemove())
     bot.register_next_step_handler(msg, process_import)
 
 def process_import(message):
-    chat_id = message.chat.id
-    if not message.document:
-        return bot.send_message(chat_id, "❌ Batal. Harus kirim file.", reply_markup=get_main_menu())
-
+    if not message.document: return bot.send_message(message.chat.id, "Batal.", reply_markup=get_main_menu())
     try:
-        file_info = bot.get_file(message.document.file_id)
-        downloaded = bot.download_file(file_info.file_path)
-        data = json.loads(downloaded.decode('utf-8'))
-        
-        db = load_db()
-        db[str(chat_id)] = data
-        save_db(db)
-        
-        bot.send_message(chat_id, "✅ <b>Import Berhasil!</b> Memuat alur terakhir...", parse_mode="HTML", reply_markup=get_main_menu())
-        
-        # MENAMPILKAN CERITA TERAKHIR SETELAH IMPORT
-        if data.get("last_story"):
-            bot.send_message(
-                chat_id, 
-                f"📖 <b>Melanjutkan Cerita:</b>\n\n{data['last_story']}", 
-                parse_mode="HTML", 
-                reply_markup=get_interactive_menu(chat_id)
-            )
-        else:
-            bot.send_message(chat_id, "Cerita siap dimulai. Klik 'Tambah Karakter' atau 'Cerita Baru'.")
-            
-    except Exception as e:
-        bot.send_message(chat_id, f"⚠️ Gagal Import: {e}", reply_markup=get_main_menu())
+        data = json.loads(bot.download_file(bot.get_file(message.document.file_id).file_path).decode())
+        db = load_db(); db[str(message.chat.id)] = data; save_db(db)
+        show_current_status(message.chat.id)
+    except: bot.send_message(message.chat.id, "Gagal.", reply_markup=get_main_menu())
 
-# ==========================================
-# 7. TAMBAH KARAKTER (FIXED)
-# ==========================================
-@bot.message_handler(func=lambda m: m.text == "👤 Tambah Karakter")
-def cmd_add_char(message):
-    msg = bot.send_message(message.chat.id, "Nama Karakter NPC Baru:", reply_markup=ReplyKeyboardRemove())
-    bot.register_next_step_handler(msg, process_npc_name)
-
-def process_npc_name(message):
-    name = message.text.strip()
-    msg = bot.send_message(message.chat.id, f"Detail/Sifat/Fisik <b>{name}</b>:", parse_mode="HTML")
-    bot.register_next_step_handler(msg, process_npc_desc, name)
-
-def process_npc_desc(message, name):
-    desc = message.text.strip()
-    db = load_db()
-    cid = str(message.chat.id)
-    if cid in db:
-        db[cid]["characters"].append({"name": name, "desc": desc})
-        save_db(db)
-        bot.send_message(message.chat.id, f"✅ <b>{name}</b> berhasil masuk cerita!", parse_mode="HTML", reply_markup=get_main_menu())
-    else:
-        bot.send_message(message.chat.id, "Klik /start dulu, Bos.")
-
-# ==========================================
-# 8. CERITA & AKSI (FIXED REGEN)
-# ==========================================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
-    chat_id = call.message.chat.id
-    data = get_user_data(chat_id)
-    bot.answer_callback_query(call.id)
-
+    cid = call.message.chat.id; data = get_user_data(cid); bot.answer_callback_query(call.id)
     if call.data == "act_regen":
-        if len(data['history']) < 2: return
-        bot.send_message(chat_id, "🔄 <i>Menulis ulang adegan...</i>", parse_mode="HTML")
-        last_prompt = data['history'][-2]['parts'][0]
-        story = generate_ai_response(chat_id, last_prompt, is_regen=True)
-        bot.send_message(chat_id, story, parse_mode="HTML", reply_markup=get_interactive_menu(chat_id))
-
-    elif call.data == "act_mc":
-        msg = bot.send_message(chat_id, f"Tindakan {data['mc']['name']}:", reply_markup=ReplyKeyboardRemove())
-        bot.register_next_step_handler(msg, process_story_step, f"{data['mc']['name']} melakukan:")
-
-    elif call.data.startswith("act_char_"):
-        idx = int(call.data.split("_")[-1])
-        name = data['characters'][idx]['name']
-        msg = bot.send_message(chat_id, f"Tindakan {name}:", reply_markup=ReplyKeyboardRemove())
-        bot.register_next_step_handler(msg, process_story_step, f"{name} melakukan:")
-
+        bot.send_message(cid, "🔄 <i>Regenerate...</i>", parse_mode="HTML")
+        story = generate_ai_response(cid, data['history'][-2]['parts'][0] if len(data['history'])>=2 else "Lanjut.", True)
+        bot.send_message(cid, story, parse_mode="HTML", reply_markup=get_interactive_menu(cid))
     elif call.data == "act_auto":
-        bot.send_message(chat_id, "⏩ <i>Melanjutkan otomatis...</i>", parse_mode="HTML")
-        story = generate_ai_response(chat_id, "Lanjutkan cerita ini secara detail puitis 2 paragraf.")
-        bot.send_message(chat_id, story, parse_mode="HTML", reply_markup=get_interactive_menu(chat_id))
+        story = generate_ai_response(cid, "Lanjutkan cerita secara detail puitis 2 paragraf.")
+        bot.send_message(cid, story, parse_mode="HTML", reply_markup=get_interactive_menu(cid))
+        bot.send_message(cid, "👇 Menu Utama:", reply_markup=get_main_menu())
+    elif call.data == "act_mc":
+        msg = bot.send_message(cid, f"Aksi {data['mc']['name']}:", reply_markup=ReplyKeyboardRemove())
+        bot.register_next_step_handler(msg, process_step, f"{data['mc']['name']}:")
 
-    elif call.data == "act_narrator":
-        msg = bot.send_message(chat_id, "Narasi berikutnya:", reply_markup=ReplyKeyboardRemove())
-        bot.register_next_step_handler(msg, process_story_step, "Narator:")
-
-def process_story_step(message, prefix):
-    chat_id = message.chat.id
-    bot.send_message(chat_id, "⏳ <i>AI Sedang Mengetik...</i>", parse_mode="HTML")
-    story = generate_ai_response(chat_id, f"{prefix} {message.text}")
-    bot.send_message(chat_id, story, parse_mode="HTML", reply_markup=get_interactive_menu(chat_id))
-    bot.send_message(chat_id, "👇 Menu Utama:", reply_markup=get_main_menu())
-
-# ==========================================
-# 9. RESET, EXPORT, NEW STORY
-# ==========================================
-@bot.message_handler(func=lambda m: m.text == "➕ Cerita Baru")
-def cmd_new_story(message):
-    msg = bot.send_message(message.chat.id, "Tuliskan premis/awal cerita baru:", reply_markup=ReplyKeyboardRemove())
-    bot.register_next_step_handler(msg, process_new_story)
-
-def process_new_story(message):
-    chat_id = message.chat.id
-    db = load_db()
-    db[str(chat_id)]["history"] = []
-    db[str(chat_id)]["summary"] = ""
-    save_db(db)
-    bot.send_message(chat_id, "⏳ <i>Menyusun Prolog...</i>", parse_mode="HTML")
-    story = generate_ai_response(chat_id, f"Buat prolog dari alur ini: {message.text}")
-    bot.send_message(chat_id, story, parse_mode="HTML", reply_markup=get_interactive_menu(chat_id))
-    bot.send_message(chat_id, "👇 Menu Utama:", reply_markup=get_main_menu())
+def process_step(message, prefix):
+    story = generate_ai_response(message.chat.id, f"{prefix} {message.text}")
+    bot.send_message(message.chat.id, story, parse_mode="HTML", reply_markup=get_interactive_menu(message.chat.id))
+    bot.send_message(message.chat.id, "👇 Menu Utama:", reply_markup=get_main_menu())
 
 @bot.message_handler(func=lambda m: m.text == "💾 Export Cerita")
 def cmd_export(message):
     data = get_user_data(message.chat.id)
-    if not data['mc']['name']: return
-    bio = io.BytesIO(json.dumps(data, indent=4, ensure_ascii=False).encode())
-    bio.name = f"backup_romkom_{message.chat.id}.json"
-    bot.send_document(message.chat.id, bio, caption="📂 File backup. Gunakan menu Import jika data hilang.", reply_markup=get_main_menu())
+    bio = io.BytesIO(json.dumps(data, indent=4, ensure_ascii=False).encode()); bio.name = "story.json"
+    bot.send_document(message.chat.id, bio, reply_markup=get_main_menu())
+
+@bot.message_handler(func=lambda m: m.text == "➕ Cerita Baru")
+def cmd_new(message):
+    msg = bot.send_message(message.chat.id, "Premis cerita baru?", reply_markup=ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, lambda m: bot.send_message(m.chat.id, generate_ai_response(m.chat.id, f"Mulai prolog: {m.text}"), parse_mode="HTML", reply_markup=get_interactive_menu(m.chat.id)))
 
 @bot.message_handler(func=lambda m: m.text == "🔄 Reset")
 def cmd_reset(message):
-    db = load_db()
-    db.pop(str(message.chat.id), None)
-    save_db(db)
-    bot.send_message(message.chat.id, "🔄 Data Dihapus. Ketik /start.", reply_markup=ReplyKeyboardRemove())
+    db = load_db(); db.pop(str(message.chat.id), None); save_db(db)
+    bot.send_message(message.chat.id, "Reset berhasil. /start.", reply_markup=ReplyKeyboardRemove())
 
 if __name__ == "__main__":
     bot.set_my_commands([BotCommand("start", "Mulai"), BotCommand("reset", "Reset")])
-    bot.infinity_polling()
+    bot.remove_webhook()
+    bot.infinity_polling(skip_pending=True)
