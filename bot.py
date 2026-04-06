@@ -43,8 +43,13 @@ def load_db():
     return {}
 
 def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    try:
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+            f.flush() # Paksa tulis ke disk
+            os.fsync(f.fileno()) # Pastikan benar-benar tersimpan
+    except Exception as e:
+        print(f"Gagal simpan database: {e}")
 
 def get_user_data(chat_id):
     db = load_db()
