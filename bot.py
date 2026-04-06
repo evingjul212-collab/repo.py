@@ -152,7 +152,18 @@ def cmd_reset(message):
     db = load_db(); db.pop(str(message.chat.id), None); save_db(db)
     bot.send_message(message.chat.id, "Reset berhasil. /start.", reply_markup=ReplyKeyboardRemove())
 
+
+
+import time # Tambahkan import time di paling atas
+
 if __name__ == "__main__":
-    bot.set_my_commands([BotCommand("start", "Mulai"), BotCommand("reset", "Reset")])
-    bot.remove_webhook()
-    bot.infinity_polling(skip_pending=True)
+    print("🤖 Mencoba menyalakan mesin...")
+    try:
+        bot.remove_webhook()
+        print("⏳ Menunggu koneksi lama terputus (5 detik)...")
+        time.sleep(5) # Kasih jeda biar koneksi lama mati dulu
+        
+        print("🚀 Bot RomCom V.6.2 Meluncur!")
+        bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=10)
+    except Exception as e:
+        print(f"❌ Gagal Total: {e}")
