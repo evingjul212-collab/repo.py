@@ -116,7 +116,7 @@ def generate_ai_response(chat_id, prompt):
     )
 
     try:
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=contents, config=config)
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=contents, config=config)
         text_response = response.text
         
         # Simpan ke history
