@@ -1,4 +1,4 @@
-import os
+mport os
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from telegram import ReplyKeyboardMarkup
 
@@ -14,6 +14,8 @@ def handle_name(update, context):
 
 TOKEN = os.environ['TELEGRAM_TOKEN']
 updater = Updater(TOKEN, use_context=True)
+
+# Handler tanpa karakter \ yang bermasalah
 updater.dispatcher.add_handler(CommandHandler('start', start))
 updater.dispatcher.add_handler(MessageHandler(Filters.text & \~Filters.command, handle_name))
 
