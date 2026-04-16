@@ -1,23 +1,18 @@
-mport os
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
-from telegram import ReplyKeyboardMarkup
+import os
+import telebot
 
-def start(update, context):
-    update.message.reply_text("Romkom V3.1")
-    update.message.reply_text("Halo! Siapa nama Anda?")
-    
-def handle_name(update, context):
-    user_name = update.message.text
-    menu_buttons = [['1. Narator'], ['2. Lanjutkan'], ['3. Save'], ['4. Load']]
-    reply_markup = ReplyKeyboardMarkup(menu_buttons, resize_keyboard=True)
-    update.message.reply_text(f"Selamat datang {user_name}!", reply_markup=reply_markup)
+bot = telebot.TeleBot(os.environ['TELEGRAM_TOKEN'])
 
-TOKEN = os.environ['TELEGRAM_TOKEN']
-updater = Updater(TOKEN, use_context=True)
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "Romkom V3.1")
+    bot.send_message(message.chat.id, "Halo! Siapa nama Anda?")
 
-# Handler tanpa karakter \ yang bermasalah
-updater.dispatcher.add_handler(CommandHandler('start', start))
-updater.dispatcher.add_handler(MessageHandler(Filters.text & \~Filters.command, handle_name))
+@bot.message_handler(func=lambda message: True)
+def handle_name(message):
+    user_name = message.text
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add('1. Narator', '2. Lanjutkan', '3. Save', '4. Load')
+    bot.send_message(message.chat.id, f"Selamat datang {user_name}!", reply_markup=markup)
 
-updater.start_polling()
-updater.idle()
+bot.polling()
