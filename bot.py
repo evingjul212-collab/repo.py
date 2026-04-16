@@ -3,7 +3,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from telegram import ReplyKeyboardMarkup
 
 def start(update, context):
-    "Halo! Siapa nama Anda?"
+    update.message.reply_text("Romkom V3.1")
     update.message.reply_text("Halo! Siapa nama Anda?")
     
 def handle_name(update, context):
