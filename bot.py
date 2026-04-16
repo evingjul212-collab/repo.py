@@ -2,26 +2,35 @@ import os
 import telebot
 
 bot = telebot.TeleBot(os.environ['TELEGRAM_TOKEN'])
-
-user_stories = {}  # Menyimpan cerita per user
+user_data = {}
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "Romkom V3.1\nHalo! Masukkan nama karakter utama:")
+    bot.send_message(message.chat.id, "Romkom V3.1\nMasukkan nama karakter utama:")
+    user_data[message.chat.id] = {'character': None}
 
 @bot.message_handler(func=lambda m: True)
 def handle_actions(message):
     chat_id = message.chat.id
     
-    if chat_id not in user_stories:
-        # Jika baru, simpan nama karakter
-        user_stories[chat_id] = {'character': message.text}
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add(message.text)  # Tombol dengan nama karakter
-        bot.send_message(chat_id, f"Karakter '{message.text}' dibuat!\nPilih karakter untuk melanjutkan cerita:", reply_markup=markup)
+    if not user_data[chat_id]['character']:
+        # Simpan nama karakter pertama kali
+        user_data[chat_id]['character'] = message.text
+        show_menu(chat_id, f"Karakter '{message.text}' telah dibuat!")
     else:
-        # Jika tombol karakter dipilih
-        if message.text == user_stories[chat_id]['character']:
-            bot.send_message(chat_id, f"Apa aksi {message.text} selanjutnya? (contoh: 'pergi ke hutan', 'bertemu penyihir')")
+        # Proses aksi berdasarkan menu
+        if message.text == '1. Narator':
+            bot.send_message(chat_id, f"{user_data[chat_id]['character']} sedang mendengarkan narator...")
+        elif message.text == '2. Lanjutkan':
+            bot.send_message(chat_id, f"Apa yang ingin {user_data[chat_id]['character']} lakukan selanjutnya?")
+        elif message.text == '5. Reset':
+            user_data[chat_id]['character'] = None
+            start(message)
+
+def show_menu(chat_id, text):
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row('1. Narator', '2. Lanjutkan')
+    markup.row('3. Save', '4. Load', '5. Reset')
+    bot.send_message(chat_id, text, reply_markup=markup)
 
 bot.polling()
