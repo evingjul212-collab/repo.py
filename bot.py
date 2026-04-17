@@ -4,18 +4,28 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
+from google.api_core import exceptions
 
-# Abaikan warning
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Setup
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash') # Ganti sesuai model yang jalan di Anda
+
+# KONSISTEN: Menggunakan model 2.5 sesuai instruksi Anda
+model = genai.GenerativeModel('gemini-2.5-flash') 
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
-db = client.game_db
-users = db.user_states
+users = client.game_db.user_states
+
+# Fungsi pembantu untuk memanggil AI dengan proteksi limit
+async def generate_with_retry(prompt):
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except exceptions.ResourceExhausted:
+        return "⚠️ Kuota AI sedang penuh (Limit terlampaui). Tunggu sebentar lagi ya!"
+    except Exception as e:
+        return f"⚠️ Terjadi error: {str(e)}"
 
 async def get_menu(user_id):
     state = await users.find_one({"_id": user_id})
@@ -27,11 +37,8 @@ async def get_menu(user_id):
     ]
     if state and state.get("name"):
         keyboard.insert(0, [InlineKeyboardButton(f"👤 Tokoh: {state['name']}", callback_data='aksi_user')])
-    
-    # Menampilkan tombol interaksi karakter
     if state and "chars" in state:
         for char in state["chars"]:
-            # Callback data disingkat untuk menghindari limit Telegram
             keyboard.append([InlineKeyboardButton(f"💬 Interaksi {char['name']}", callback_data=f"int_{char['name']}")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -56,16 +63,16 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif step == "wait_char_desc":
         name = state.get("temp_char_name")
         await users.update_one({"_id": uid}, {"$push": {"chars": {"name": name, "desc": text}}, "$set": {"step": None}})
-        await update.message.reply_text(f"Karakter {name} berhasil ditambahkan!", reply_markup=await get_menu(uid))
+        await update.message.reply_text(f"Karakter {name} ditambahkan!", reply_markup=await get_menu(uid))
 
     elif step == "input_narator":
-        res = model.generate_content(f"Tulis 2 paragraf cerita rom-com: {text}").text
+        res = await generate_with_retry(f"Tulis 2 paragraf cerita rom-com: {text}")
         await users.update_one({"_id": uid}, {"$push": {"history": res}, "$set": {"step": None}})
         await update.message.reply_text(f"📖 {res}", reply_markup=await get_menu(uid))
 
     elif step == "input_aksi_user":
         hist = state['history'][-1] if state.get('history') else "Cerita dimulai."
-        res = model.generate_content(f"Tokoh {state['name']} melakukan: {text}. Lanjutkan cerita rom-com 2 paragraf. Histori: {hist}").text
+        res = await generate_with_retry(f"Tokoh {state['name']} melakukan: {text}. Lanjutkan cerita rom-com 2 paragraf. Histori: {hist}")
         await users.update_one({"_id": uid}, {"$push": {"history": res}, "$set": {"step": None}})
         await update.message.reply_text(f"✨ {res}", reply_markup=await get_menu(uid))
 
@@ -90,7 +97,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         char = next((c for c in state.get('chars', []) if c['name'] == char_name), {"desc": "Teman dekat"})
         hist = state.get('history', [])
         last_hist = hist[-1] if hist else "Cerita baru saja dimulai."
-        res = model.generate_content(f"Buat interaksi 2 paragraf antara {state['name']} dan {char_name}. Deskripsi: {char['desc']}. Histori: {last_hist}").text
+        res = await generate_with_retry(f"Buat interaksi 2 paragraf antara {state['name']} dan {char_name}. Deskripsi: {char['desc']}. Histori: {last_hist}")
         await users.update_one({"_id": uid}, {"$push": {"history": res}})
         await query.edit_message_text(f"💕 {res}", reply_markup=await get_menu(uid))
     elif data == 'reset':
