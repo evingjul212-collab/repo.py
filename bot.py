@@ -5,13 +5,14 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# Abaikan warning library
+# Abaikan warning library agar log bersih
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Setup
+# Setup Koneksi
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash') 
+# Sesuaikan nama model yang jalan di API Key Anda
+model = genai.GenerativeModel('gemini-2.5-flash-exp') 
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
@@ -43,12 +44,12 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = state.get("step") if state else None
 
     if step == "input_name":
-        await users.update_one({"_id": uid}, {"$set": {"name": text, "history": ["Cerita dimulai."], "chars": [], "step": None}})
+        await users.update_one({"_id": uid}, {"$set": {"name": text, "history": ["Cerita dimulai."], "chars": [], "step": None}}, upsert=True)
         await update.message.reply_text(f"Nama {text} disimpan!", reply_markup=await get_menu(uid))
     
     elif step == "wait_char_name":
         await users.update_one({"_id": uid}, {"$set": {"temp_char_name": text, "step": "wait_char_desc"}})
-        await update.message.reply_text(f"Nama '{text}' disimpan. Sekarang masukkan deskripsi & hubungan karakter dengan tokoh utama:")
+        await update.message.reply_text(f"Nama '{text}' disimpan. Sekarang masukkan deskripsi & hubungan dengan tokoh utama:")
 
     elif step == "wait_char_desc":
         name = state.get("temp_char_name")
@@ -80,21 +81,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'aksi_user':
         await users.update_one({"_id": uid}, {"$set": {"step": "input_aksi_user"}})
         await query.edit_message_text("Apa aksi tokoh utama sekarang?")
- elif query.data.startswith("interaksi_"):
+    elif query.data.startswith("interaksi_"):
         char_name = query.data.split("_")[1]
         state = await users.find_one({"_id": uid})
-        
-        # Penanganan aman jika history kosong
+        char = next((c for c in state.get('chars', []) if c['name'] == char_name), {"desc": "Teman dekat"})
         hist = state.get('history', [])
         last_hist = hist[-1] if hist else "Cerita baru saja dimulai."
-        
-        char = next((c for c in state.get('chars', []) if c['name'] == char_name), {"desc": "Teman"})
-        
-        prompt = f"Buat interaksi 2 paragraf antara {state['name']} dan {char_name} ({char['desc']}). Histori: {last_hist}"
-        res = model.generate_content(prompt).text
-        
+        res = model.generate_content(f"Buat interaksi 2 paragraf antara {state['name']} dan {char_name}. Deskripsi: {char['desc']}. Histori: {last_hist}").text
         await users.update_one({"_id": uid}, {"$push": {"history": res}})
         await query.edit_message_text(f"💕 {res}", reply_markup=await get_menu(uid))
+    elif query.data == 'reset':
+        await users.delete_one({"_id": uid})
+        await query.edit_message_text("Data dihapus. Ketik /start untuk mulai lagi.")
+    elif query.data == 'undo':
+        await users.update_one({"_id": uid}, {"$pop": {"history": 1}})
+        await query.edit_message_text("Pesan terakhir dihapus.", reply_markup=await get_menu(uid))
 
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
