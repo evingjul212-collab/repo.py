@@ -1,7 +1,9 @@
+import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
+from motor.motor_asyncio import AsyncIOMotorClien
 
 # Setup
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
