@@ -8,7 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 # Menggunakan TELEGRAM_TOKEN sesuai yang ada di Railway Anda
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Koneksi ke MongoDB Railway
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
