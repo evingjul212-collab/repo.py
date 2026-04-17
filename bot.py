@@ -80,16 +80,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'aksi_user':
         await users.update_one({"_id": uid}, {"$set": {"step": "input_aksi_user"}})
         await query.edit_message_text("Apa aksi tokoh utama sekarang?")
-    elif query.data.startswith("interaksi_"):
+ elif query.data.startswith("interaksi_"):
         char_name = query.data.split("_")[1]
         state = await users.find_one({"_id": uid})
-        char = next((c for c in state['chars'] if c['name'] == char_name), {"desc": "Teman"})
-        res = model.generate_content(f"Buat interaksi 2 paragraf antara {state['name']} dan {char_name}. Deskripsi: {char['desc']}. Histori: {state['history'][-1]}").text
+        
+        # Penanganan aman jika history kosong
+        hist = state.get('history', [])
+        last_hist = hist[-1] if hist else "Cerita baru saja dimulai."
+        
+        char = next((c for c in state.get('chars', []) if c['name'] == char_name), {"desc": "Teman"})
+        
+        prompt = f"Buat interaksi 2 paragraf antara {state['name']} dan {char_name} ({char['desc']}). Histori: {last_hist}"
+        res = model.generate_content(prompt).text
+        
         await users.update_one({"_id": uid}, {"$push": {"history": res}})
         await query.edit_message_text(f"💕 {res}", reply_markup=await get_menu(uid))
-    elif query.data == 'reset':
-        await users.delete_one({"_id": uid})
-        await query.edit_message_text("Data dihapus. Ketik /start untuk mulai lagi.")
 
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
