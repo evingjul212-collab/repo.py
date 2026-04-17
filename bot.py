@@ -1,6 +1,7 @@
 import os
 import requests
 import base64
+import time
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -25,18 +26,27 @@ MODELS = [
     "gemini-2.0-flash"
 ]
 
-SYSTEM_PROMPT = """Kamu adalah AI assistant yang sangat pintar.
-Fokus:
-- Jawaban jelas, tidak bertele-tele
+SYSTEM_PROMPT = """Kamu adalah AI assistant pintar.
+- Jawaban jelas & santai
 - Jago coding Python
 - Bisa debug error
-- Jelaskan step-by-step jika perlu
-- Gunakan bahasa santai"""
+- Jelaskan step-by-step"""
 
 # =========================
 # MEMORY
 # =========================
 user_memory = {}
+
+# =========================
+# SPLIT TELEGRAM MESSAGE
+# =========================
+def split_text(text, max_length=4000):
+    return [text[i:i+max_length] for i in range(0, len(text), max_length)]
+
+async def send_long_message(update, text):
+    parts = split_text(text)
+    for part in parts:
+        await update.message.reply_text(part)
 
 # =========================
 # GEMINI TEXT
@@ -46,14 +56,17 @@ def ask_gemini(messages):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={GEMINI_API_KEY}"
 
         payload = {
-            "contents": messages
+            "contents": messages,
+            "generationConfig": {
+                "maxOutputTokens": 1000
+            }
         }
 
         try:
             res = requests.post(url, json=payload, timeout=30)
             data = res.json()
 
-            print(f"[TEXT] {MODEL}:", data)
+            print(f"[TEXT {MODEL}]:", data)
 
             if "candidates" in data and len(data["candidates"]) > 0:
                 return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -67,40 +80,46 @@ def ask_gemini(messages):
 # GEMINI IMAGE
 # =========================
 def ask_gemini_image(prompt, image_data):
-    MODEL = "gemini-2.5-flash"
+    for MODEL in MODELS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={GEMINI_API_KEY}"
-
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": image_data
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": image_data
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "maxOutputTokens": 1000
             }
-        ]
-    }
+        }
 
-    try:
-        res = requests.post(url, json=payload, timeout=30)
-        data = res.json()
+        for attempt in range(2):
+            try:
+                res = requests.post(url, json=payload, timeout=30)
+                data = res.json()
 
-        print("[IMAGE]:", data)
+                print(f"[IMAGE {MODEL} attempt {attempt}]:", data)
 
-        if "candidates" in data and len(data["candidates"]) > 0:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        else:
-            return "❌ Error image:\n" + str(data)
+                if "candidates" in data and len(data["candidates"]) > 0:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
 
-    except Exception as e:
-        print(e)
-        return "⚠️ Error gambar"
+                if "error" in data and data["error"]["code"] == 503:
+                    time.sleep(2)
+                    continue
+
+            except Exception as e:
+                print("ERROR:", e)
+
+    return "❌ Gagal proses gambar (server sibuk)"
 
 # =========================
 # START
@@ -108,10 +127,8 @@ def ask_gemini_image(prompt, image_data):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 AI Assistant siap!\n\n"
-        "✔ Chat biasa\n"
-        "✔ Bantu coding Python\n"
-        "✔ Bisa baca gambar\n\n"
-        "/reset untuk hapus memory"
+        "✔ Chat\n✔ Coding Python\n✔ Baca gambar\n\n"
+        "/reset untuk reset memory"
     )
 
 # =========================
@@ -141,7 +158,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_memory[user_id].append({"role": "model", "parts": [{"text": reply}]})
 
-    await update.message.reply_text(reply)
+    await send_long_message(update, reply)
 
 # =========================
 # HANDLE IMAGE
@@ -156,11 +173,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(path, "rb") as f:
         image_data = base64.b64encode(f.read()).decode("utf-8")
 
-    prompt = "Analisa gambar ini dan jelaskan secara detail."
+    prompt = "Jelaskan gambar ini dengan detail"
 
     reply = ask_gemini_image(prompt, image_data)
 
-    await update.message.reply_text(reply)
+    await send_long_message(update, reply)
 
 # =========================
 # MAIN
@@ -178,8 +195,11 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
 
-    print("🚀 AI BOT READY (TEXT + IMAGE + CODING)")
+    print("🚀 BOT READY (FULL AI)")
     app.run_polling()
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     main()
