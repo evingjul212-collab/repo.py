@@ -1,65 +1,73 @@
 import os
-import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# Menggunakan TELEGRAM_TOKEN sesuai yang ada di Railway Anda
+# Setup
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel('gemini-2.5-flash')
-
-# Koneksi ke MongoDB Railway
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
-db = client.game_db
-users = db.user_states
+users = db = client.game_db.user_states
 
-async def get_user_state(user_id):
+async def get_menu(user_id):
     state = await users.find_one({"_id": user_id})
-    if not state:
-        state = {"_id": user_id, "history": [], "char": "Belum ada"}
-        await users.insert_one(state)
-    return state
-
-def get_menu():
+    # Tombol Dasar
     keyboard = [
-        [InlineKeyboardButton("1. Narator", callback_data='narator'), InlineKeyboardButton("2. Lanjutkan", callback_data='lanjut')],
-        [InlineKeyboardButton("5. Reset", callback_data='reset'), InlineKeyboardButton("7. Undo", callback_data='undo')],
-        [InlineKeyboardButton("6. Tambah Karakter", callback_data='tambah_karakter')]
+        [InlineKeyboardButton("1. Narator", callback_data='narator'), InlineKeyboardButton("2. Lanjut", callback_data='lanjut')],
+        [InlineKeyboardButton("3. Save", callback_data='save'), InlineKeyboardButton("4. Load", callback_data='load')],
+        [InlineKeyboardButton("5. Reset", callback_data='reset'), InlineKeyboardButton("6. Tambah Karakter", callback_data='tambah_karakter')],
+        [InlineKeyboardButton("7. Undo", callback_data='undo')]
     ]
+    # Tambahkan tombol karakter sebagai opsi interaksi
+    if state and "chars" in state:
+        for char in state["chars"]:
+            keyboard.append([InlineKeyboardButton(f"💬 Interaksi dengan {char}", callback_data=f"interaksi_{char}")])
     return InlineKeyboardMarkup(keyboard)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Game dimulai! Pilih menu:", reply_markup=get_menu())
+    await update.message.reply_text("Siapa nama tokoh utama Anda?")
+    context.user_data['wait_name'] = True
+
+async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if context.user_data.get('wait_name'):
+        await users.update_one({"_id": user_id}, {"$set": {"name": update.message.text, "history": [], "chars": []}}, upsert=True)
+        context.user_data['wait_name'] = False
+        await update.message.reply_text(f"Halo {update.message.text}, selamat datang!", reply_markup=await get_menu(user_id))
+    elif context.user_data.get('wait_narator'):
+        prompt = f"Tulis narasi pembuka rom-com berdasarkan alur ini: {update.message.text}"
+        res = model.generate_content(prompt).text
+        await users.update_one({"_id": user_id}, {"$push": {"history": res}})
+        context.user_data['wait_narator'] = False
+        await update.message.reply_text(f"📖 {res}", reply_markup=await get_menu(user_id))
+    elif context.user_data.get('wait_char'):
+        await users.update_one({"_id": user_id}, {"$push": {"chars": update.message.text}})
+        context.user_data['wait_char'] = False
+        await update.message.reply_text("Karakter ditambah!", reply_markup=await get_menu(user_id))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
     await query.answer()
     
-    if query.data == 'reset':
-        await users.update_one({"_id": uid}, {"$set": {"history": [], "char": "Belum ada"}})
-        await query.edit_message_text("Game di-reset.", reply_markup=get_menu())
-    elif query.data == 'narator':
-        res = model.generate_content("Tulis pembukaan cerita rom-com.").text
-        await users.update_one({"_id": uid}, {"$push": {"history": res}})
-        await query.edit_message_text(f"📖 {res}", reply_markup=get_menu())
+    if query.data == 'narator':
+        context.user_data['wait_narator'] = True
+        await query.edit_message_text("Masukkan alur cerita yang kamu inginkan:")
     elif query.data == 'lanjut':
-        state = await get_user_state(uid)
-        last_hist = state['history'][-1] if state['history'] else "Mulai cerita baru."
-        res = model.generate_content(f"Lanjutkan cerita ini: {last_hist}").text
+        state = await users.find_one({"_id": uid})
+        res = model.generate_content(f"Lanjutkan cerita rom-com untuk {state['name']}: {state['history'][-1]}").text
         await users.update_one({"_id": uid}, {"$push": {"history": res}})
-        await query.edit_message_text(f"✨ {res}", reply_markup=get_menu())
+        await query.edit_message_text(f"✨ {res}", reply_markup=await get_menu(uid))
     elif query.data == 'tambah_karakter':
-        context.user_data['wait'] = True
-        await query.edit_message_text("Ketik nama karakter:")
-
-async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get('wait'):
-        await users.update_one({"_id": update.effective_user.id}, {"$set": {"char": update.message.text}})
-        context.user_data['wait'] = False
-        await update.message.reply_text("Karakter disimpan!", reply_markup=get_menu())
+        context.user_data['wait_char'] = True
+        await query.edit_message_text("Masukkan nama karakter baru:")
+    elif query.data.startswith("interaksi_"):
+        char_name = query.data.split("_")[1]
+        state = await users.find_one({"_id": uid})
+        res = model.generate_content(f"Buat interaksi romantis antara {state['name']} dan {char_name}. Cerita: {state['history'][-1]}").text
+        await query.edit_message_text(f"💕 {res}", reply_markup=await get_menu(uid))
 
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
