@@ -167,6 +167,44 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text(f"❌ Error: {e}")
 
+    # ===== INTERAKSI KARAKTER (INPUT USER) =====
+    elif step == "input_char_action":
+        try:
+            idx = state.get("selected_char")
+            chars = state.get("chars", [])
+
+            if idx is None or idx >= len(chars):
+                await update.message.reply_text("⚠️ Karakter tidak valid.")
+                return
+
+            char = chars[idx]
+            hist = state.get("history", ["Cerita dimulai."])[-1]
+
+            res = model.generate_content(
+                f"{state.get('name','Tokoh')} melakukan: {text} kepada {char['name']}.\n"
+                f"Deskripsi: {char['desc']}\n"
+                f"Lanjutkan cerita romcom 2 paragraf.\n"
+                f"Histori: {hist}"
+            )
+
+            out = trim(safe_text(res))
+
+            await users.update_one(
+                {"_id": uid},
+                {
+                    "$push": {"history": out},
+                    "$set": {"step": None, "selected_char": None}
+                }
+            )
+
+            await update.message.reply_text(
+                f"💕 {out}",
+                reply_markup=await get_menu(uid)
+            )
+
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+
 # ================= BUTTON =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -193,7 +231,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await users.update_one({"_id": uid}, {"$set": {"step": "input_aksi_user"}})
         await query.message.reply_text("Aksi tokoh:")
 
-    # ===== INTERAKSI KARAKTER (FIX UTAMA) =====
+    # ===== INTERAKSI KARAKTER (FIX SESUAI REQUEST) =====
     elif data.startswith("c_"):
         try:
             idx = int(data.split("_")[1])
@@ -207,32 +245,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text("⚠️ Karakter tidak valid.")
                 return
 
-            char = chars[idx]
-            hist = state.get("history", ["Cerita dimulai."])[-1]
-
-            res = model.generate_content(
-                f"Interaksi romantis-komedi 2 paragraf antara "
-                f"{state.get('name','Tokoh')} dan {char['name']}.\n"
-                f"Deskripsi: {char['desc']}\n"
-                f"Histori: {hist}"
-            )
-
-            out = trim(safe_text(res))
-
             await users.update_one(
                 {"_id": uid},
-                {"$push": {"history": out}}
+                {"$set": {
+                    "step": "input_char_action",
+                    "selected_char": idx
+                }}
             )
 
             await query.message.reply_text(
-                f"💕 {out}",
-                reply_markup=await get_menu(uid)
+                f"Aksi ke {chars[idx]['name']}?"
             )
 
         except Exception as e:
-            await query.message.reply_text(f"❌ Error interaksi: {e}")
+            await query.message.reply_text(f"❌ Error: {e}")
 
-    # ===== LANJUT =====
+    # ===== LANJUT (AUTO) =====
     elif data == 'lanjut':
         try:
             hist = state.get("history", ["Cerita dimulai."])[-1]
@@ -255,18 +283,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.message.reply_text(f"❌ Error: {e}")
 
-    # ===== UNDO =====
+    # ===== UNDO (FIX TOTAL) =====
     elif data == 'undo':
         hist = state.get("history", [])
 
         if len(hist) > 1:
             hist.pop()
-            await users.update_one({"_id": uid}, {"$set": {"history": hist}})
-            await query.message.reply_text("↩️ Undo berhasil.")
+
+            await users.update_one(
+                {"_id": uid},
+                {"$set": {"history": hist}}
+            )
+
+            last = hist[-1]
+
+            await query.message.reply_text(
+                f"↩️ Kembali:\n\n{last}",
+                reply_markup=await get_menu(uid)
+            )
         else:
             await query.message.reply_text("⚠️ Tidak bisa undo.")
-
-        await query.message.reply_text(reply_markup=await get_menu(uid))
 
     # ===== RESET =====
     elif data == 'reset':
