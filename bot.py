@@ -3,74 +3,66 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
-from motor.motor_asyncio import AsyncIOMotorClien
+from motor.motor_asyncio import AsyncIOMotorClient
 
-# Setup
+# Menggunakan TELEGRAM_TOKEN sesuai yang ada di Railway Anda
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-genai.configure(api_key="GEMINI_API_KEY")
-model = genai.GenerativeModel('gemini-2.5-flash')
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Koneksi ke MongoDB Railway
+client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
+db = client.game_db
+users = db.user_states
 
-# Penyimpanan Data Game (In-memory)
-user_data = {}
+async def get_user_state(user_id):
+    state = await users.find_one({"_id": user_id})
+    if not state:
+        state = {"_id": user_id, "history": [], "char": "Belum ada"}
+        await users.insert_one(state)
+    return state
 
 def get_menu():
     keyboard = [
         [InlineKeyboardButton("1. Narator", callback_data='narator'), InlineKeyboardButton("2. Lanjutkan", callback_data='lanjut')],
-        [InlineKeyboardButton("3. Save", callback_data='save'), InlineKeyboardButton("4. Load", callback_data='load')],
-        [InlineKeyboardButton("5. Reset", callback_data='reset')],
-        [InlineKeyboardButton("6. Tambah Karakter", callback_data='tambah_karakter'), InlineKeyboardButton("7. Undo", callback_data='undo')]
+        [InlineKeyboardButton("5. Reset", callback_data='reset'), InlineKeyboardButton("7. Undo", callback_data='undo')],
+        [InlineKeyboardButton("6. Tambah Karakter", callback_data='tambah_karakter')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_data[user_id] = {"history": [], "char": "Belum ada", "saved_state": None}
-    await update.message.reply_text("Selamat datang di Game Rom-Com! Pilih menu di bawah:", reply_markup=get_menu())
+    await update.message.reply_text("Game dimulai! Pilih menu:", reply_markup=get_menu())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
+    uid = query.from_user.id
     await query.answer()
-
-    if query.data == 'reset':
-        user_data[user_id] = {"history": [], "char": "Belum ada"}
-        await query.edit_message_text("Game telah di-reset.", reply_markup=get_menu())
     
+    if query.data == 'reset':
+        await users.update_one({"_id": uid}, {"$set": {"history": [], "char": "Belum ada"}})
+        await query.edit_message_text("Game di-reset.", reply_markup=get_menu())
     elif query.data == 'narator':
-        prompt = "Berikan narasi pembuka untuk game Visual Novel rom-com singkat dan menarik."
-        response = model.generate_content(prompt).text
-        user_data[user_id]["history"].append(response)
-        await query.edit_message_text(f"📖 *Narator:*\n{response}", reply_markup=get_menu(), parse_mode='Markdown')
-
+        res = model.generate_content("Tulis pembukaan cerita rom-com.").text
+        await users.update_one({"_id": uid}, {"$push": {"history": res}})
+        await query.edit_message_text(f"📖 {res}", reply_markup=get_menu())
     elif query.data == 'lanjut':
-        history_text = "\n".join(user_data[user_id]["history"][-3:])
-        prompt = f"Lanjutkan cerita Visual Novel rom-com berikut dengan pilihan aksi yang menarik bagi pemain: {history_text}"
-        response = model.generate_content(prompt).text
-        user_data[user_id]["history"].append(response)
-        await query.edit_message_text(f"✨ *Cerita:*\n{response}", reply_markup=get_menu(), parse_mode='Markdown')
-
-    elif query.data == 'undo':
-        if len(user_data[user_id]["history"]) > 0:
-            user_data[user_id]["history"].pop()
-            await query.edit_message_text("Pesan terakhir dihapus. Tekan 'Lanjutkan' untuk mencoba alur lain.", reply_markup=get_menu())
-
+        state = await get_user_state(uid)
+        last_hist = state['history'][-1] if state['history'] else "Mulai cerita baru."
+        res = model.generate_content(f"Lanjutkan cerita ini: {last_hist}").text
+        await users.update_one({"_id": uid}, {"$push": {"history": res}})
+        await query.edit_message_text(f"✨ {res}", reply_markup=get_menu())
     elif query.data == 'tambah_karakter':
-        await query.edit_message_text("Ketik nama karakter yang ingin kamu tambahkan (Contoh: 'Siska, gadis kutu buku'):")
-        context.user_data['waiting_for_char'] = True
+        context.user_data['wait'] = True
+        await query.edit_message_text("Ketik nama karakter:")
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if context.user_data.get('waiting_for_char'):
-        char_name = update.message.text
-        user_data[user_id]["char"] = char_name
-        context.user_data['waiting_for_char'] = False
-        await update.message.reply_text(f"Karakter {char_name} berhasil ditambahkan!", reply_markup=get_menu())
+async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('wait'):
+        await users.update_one({"_id": update.effective_user.id}, {"$set": {"char": update.message.text}})
+        context.user_data['wait'] = False
+        await update.message.reply_text("Karakter disimpan!", reply_markup=get_menu())
 
-app = Application.builder().token(TOKEN).build()
+app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
 app.run_polling()
