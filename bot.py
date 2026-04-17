@@ -4,7 +4,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 import google.generativeai as genai
 
 # Setup
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key="GEMINI_API_KEY")
 model = genai.GenerativeModel('gemini-2.5-flash')
 
