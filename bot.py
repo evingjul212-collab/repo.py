@@ -1,5 +1,6 @@
 import os
 import warnings
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -7,13 +8,14 @@ from telegram.ext import (
 )
 import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
+from google.api_core.exceptions import ResourceExhausted
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3-flash-preview')
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
@@ -29,6 +31,18 @@ def safe_text(res):
 
 def trim(text, limit=4000):
     return text[:limit]
+
+async def generate_ai(prompt):
+    try:
+        await asyncio.sleep(1)  # biar gak spam quota
+        res = model.generate_content(prompt)
+        return trim(safe_text(res))
+
+    except ResourceExhausted:
+        return "⚠️ Limit AI tercapai (free quota). Coba lagi nanti ya."
+
+    except Exception as e:
+        return f"⚠️ Error AI: {str(e)}"
 
 # ================= MENU =================
 
@@ -54,7 +68,6 @@ async def get_menu(user_id):
             InlineKeyboardButton(f"👤 {state['name']}", callback_data='aksi_user')
         ])
 
-    # tombol karakter
     for i, char in enumerate(state.get("chars", [])):
         keyboard.append([
             InlineKeyboardButton(f"💬 {char['name']}", callback_data=f"c_{i}")
@@ -124,86 +137,72 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ===== NARATOR =====
     elif step == "input_narator":
-        try:
-            res = model.generate_content(
-                f"Tulis cerita romcom 2 paragraf:\n{text}"
-            )
-            out = trim(safe_text(res))
+        hist = state.get("history", ["Cerita dimulai."])[-1]
 
-            await users.update_one(
-                {"_id": uid},
-                {"$push": {"history": out}, "$set": {"step": None}}
-            )
+        out = await generate_ai(
+            f"Tulis cerita romcom 2 paragraf.\nInput: {text}\nHistori: {hist}"
+        )
 
-            await update.message.reply_text(
-                f"📖 {out}",
-                reply_markup=await get_menu(uid)
-            )
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {e}")
+        await users.update_one(
+            {"_id": uid},
+            {"$push": {"history": out}, "$set": {"step": None}}
+        )
+
+        await update.message.reply_text(
+            f"📖 {out}",
+            reply_markup=await get_menu(uid)
+        )
 
     # ===== AKSI USER =====
     elif step == "input_aksi_user":
-        try:
-            hist = state.get("history", ["Cerita dimulai."])[-1]
+        hist = state.get("history", ["Cerita dimulai."])[-1]
 
-            res = model.generate_content(
-                f"{state.get('name','Tokoh')} melakukan: {text}\n"
-                f"Lanjutkan cerita romcom 2 paragraf.\n"
-                f"Histori: {hist}"
-            )
+        out = await generate_ai(
+            f"{state.get('name','Tokoh')} melakukan: {text}\n"
+            f"Lanjutkan romcom 2 paragraf.\nHistori: {hist}"
+        )
 
-            out = trim(safe_text(res))
+        await users.update_one(
+            {"_id": uid},
+            {"$push": {"history": out}, "$set": {"step": None}}
+        )
 
-            await users.update_one(
-                {"_id": uid},
-                {"$push": {"history": out}, "$set": {"step": None}}
-            )
+        await update.message.reply_text(
+            f"✨ {out}",
+            reply_markup=await get_menu(uid)
+        )
 
-            await update.message.reply_text(
-                f"✨ {out}",
-                reply_markup=await get_menu(uid)
-            )
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {e}")
-
-    # ===== INTERAKSI KARAKTER (INPUT USER) =====
+    # ===== INTERAKSI KARAKTER =====
     elif step == "input_char_action":
-        try:
-            idx = state.get("selected_char")
-            chars = state.get("chars", [])
+        idx = state.get("selected_char")
+        chars = state.get("chars", [])
 
-            if idx is None or idx >= len(chars):
-                await update.message.reply_text("⚠️ Karakter tidak valid.")
-                return
+        if idx is None or idx >= len(chars):
+            await update.message.reply_text("⚠️ Karakter tidak valid.")
+            return
 
-            char = chars[idx]
-            hist = state.get("history", ["Cerita dimulai."])[-1]
+        char = chars[idx]
+        hist = state.get("history", ["Cerita dimulai."])[-1]
 
-            res = model.generate_content(
-                f"{state.get('name','Tokoh')} melakukan: {text} kepada {char['name']}.\n"
-                f"Deskripsi: {char['desc']}\n"
-                f"Lanjutkan cerita romcom 2 paragraf.\n"
-                f"Histori: {hist}"
-            )
+        out = await generate_ai(
+            f"{state.get('name','Tokoh')} melakukan: {text} kepada {char['name']}.\n"
+            f"Deskripsi: {char['desc']}\n"
+            f"Lanjutkan cerita romcom 2 paragraf.\n"
+            f"Histori: {hist}"
+        )
 
-            out = trim(safe_text(res))
+        await users.update_one(
+            {"_id": uid},
+            {
+                "$push": {"history": out},
+                "$set": {"step": None, "selected_char": None}
+            }
+        )
 
-            await users.update_one(
-                {"_id": uid},
-                {
-                    "$push": {"history": out},
-                    "$set": {"step": None, "selected_char": None}
-                }
-            )
-
-            await update.message.reply_text(
-                f"💕 {out}",
-                reply_markup=await get_menu(uid)
-            )
-
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {e}")
+        await update.message.reply_text(
+            f"💕 {out}",
+            reply_markup=await get_menu(uid)
+        )
 
 # ================= BUTTON =================
 
@@ -216,74 +215,50 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = await users.find_one({"_id": uid}) or {}
 
-    # ===== NARATOR =====
     if data == 'narator':
         await users.update_one({"_id": uid}, {"$set": {"step": "input_narator"}})
         await query.message.reply_text("Masukkan cerita:")
 
-    # ===== TAMBAH KARAKTER =====
     elif data == 'tambah_karakter':
         await users.update_one({"_id": uid}, {"$set": {"step": "wait_char_name"}})
         await query.message.reply_text("Nama karakter:")
 
-    # ===== AKSI USER =====
     elif data == 'aksi_user':
         await users.update_one({"_id": uid}, {"$set": {"step": "input_aksi_user"}})
         await query.message.reply_text("Aksi tokoh:")
 
-    # ===== INTERAKSI KARAKTER (FIX SESUAI REQUEST) =====
     elif data.startswith("c_"):
-        try:
-            idx = int(data.split("_")[1])
-            chars = state.get("chars", [])
+        idx = int(data.split("_")[1])
+        chars = state.get("chars", [])
 
-            if not chars:
-                await query.message.reply_text("⚠️ Belum ada karakter.")
-                return
+        if not chars or idx >= len(chars):
+            await query.message.reply_text("⚠️ Karakter tidak valid.")
+            return
 
-            if idx >= len(chars):
-                await query.message.reply_text("⚠️ Karakter tidak valid.")
-                return
+        await users.update_one(
+            {"_id": uid},
+            {"$set": {"step": "input_char_action", "selected_char": idx}}
+        )
 
-            await users.update_one(
-                {"_id": uid},
-                {"$set": {
-                    "step": "input_char_action",
-                    "selected_char": idx
-                }}
-            )
+        await query.message.reply_text(f"Aksi ke {chars[idx]['name']}?")
 
-            await query.message.reply_text(
-                f"Aksi ke {chars[idx]['name']}?"
-            )
-
-        except Exception as e:
-            await query.message.reply_text(f"❌ Error: {e}")
-
-    # ===== LANJUT (AUTO) =====
     elif data == 'lanjut':
-        try:
-            hist = state.get("history", ["Cerita dimulai."])[-1]
+        hist = state.get("history", ["Cerita dimulai."])[-1]
 
-            res = model.generate_content(
-                f"Lanjutkan cerita romcom 2 paragraf:\n{hist}"
-            )
+        out = await generate_ai(
+            f"Lanjutkan cerita romcom 2 paragraf:\n{hist}"
+        )
 
-            out = trim(safe_text(res))
+        await users.update_one(
+            {"_id": uid},
+            {"$push": {"history": out}}
+        )
 
-            await users.update_one(
-                {"_id": uid},
-                {"$push": {"history": out}}
-            )
+        await query.message.reply_text(
+            f"✨ {out}",
+            reply_markup=await get_menu(uid)
+        )
 
-            await query.message.reply_text(
-                f"✨ {out}",
-                reply_markup=await get_menu(uid)
-            )
-        except Exception as e:
-            await query.message.reply_text(f"❌ Error: {e}")
-
-    # ===== UNDO (FIX TOTAL) =====
     elif data == 'undo':
         hist = state.get("history", [])
 
@@ -295,23 +270,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {"$set": {"history": hist}}
             )
 
-            last = hist[-1]
-
             await query.message.reply_text(
-                f"↩️ Kembali:\n\n{last}",
+                f"↩️ {hist[-1]}",
                 reply_markup=await get_menu(uid)
             )
         else:
             await query.message.reply_text("⚠️ Tidak bisa undo.")
 
-    # ===== RESET =====
     elif data == 'reset':
         await users.delete_one({"_id": uid})
         await query.message.reply_text("🔄 Reset selesai. /start lagi")
 
 # ================= RUN =================
 
-defaults = Defaults(parse_mode='Markdown')
+defaults = Defaults(parse_mode=None)  # FIX MARKDOWN ERROR
 
 app = Application.builder().token(BOT_TOKEN).defaults(defaults).build()
 
