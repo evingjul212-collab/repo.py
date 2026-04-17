@@ -1,14 +1,17 @@
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-import google.generativeai as genai
+from google import genai
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # Setup Gemini 2.0 Flash
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash') # Menggunakan model terbaru
-
+client_gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+response = client_gemini.models.generate_content(
+    model="gemini-2.5-flash", # Sesuaikan dengan model yang Anda pakai
+    contents=prompt
+)
+res = response.text
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
 users = db.user_states
