@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 # Sesuaikan nama model yang jalan di API Key Anda
-model = genai.GenerativeModel('gemini-2.5-flash-exp') 
+model = genai.GenerativeModel('gemini-2.5-flash') 
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
