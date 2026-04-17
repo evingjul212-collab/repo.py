@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # Setup
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.0-flash-exp') 
+model = genai.GenerativeModel('gemini-2.5-flash') 
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
