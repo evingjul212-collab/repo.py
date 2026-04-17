@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-3-flash-preview')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
@@ -34,15 +34,50 @@ def trim(text, limit=4000):
 
 async def generate_ai(prompt):
     try:
-        await asyncio.sleep(1)  # biar gak spam quota
+        await asyncio.sleep(1)
         res = model.generate_content(prompt)
         return trim(safe_text(res))
-
     except ResourceExhausted:
-        return "⚠️ Limit AI tercapai (free quota). Coba lagi nanti ya."
-
+        return "⚠️ Limit AI tercapai (free quota). Coba lagi nanti."
     except Exception as e:
         return f"⚠️ Error AI: {str(e)}"
+
+# ================= MEMORY SYSTEM =================
+
+def build_memory(state):
+    return (
+        f"Waktu: {state.get('time')}\n"
+        f"Lokasi: {state.get('location')}\n"
+        f"Scene: {state.get('scene')}\n"
+        f"Outfit: {state.get('outfit')}\n"
+    )
+
+def update_memory_fields(state, text):
+    t = text.lower()
+
+    # waktu
+    if "malam" in t: state["time"] = "malam"
+    elif "sore" in t: state["time"] = "sore"
+    elif "siang" in t: state["time"] = "siang"
+    elif "pagi" in t: state["time"] = "pagi"
+
+    # lokasi
+    if "sekolah" in t: state["location"] = "sekolah"
+    elif "pantai" in t: state["location"] = "pantai"
+    elif "rumah" in t: state["location"] = "rumah"
+    elif "kafe" in t: state["location"] = "kafe"
+
+    # outfit
+    if "ganti baju" in t:
+        state["outfit"] = "pakaian baru"
+
+    # scene
+    if "masuk" in t:
+        state["scene"] = "di dalam ruangan"
+    elif "keluar" in t:
+        state["scene"] = "di luar"
+
+    return state
 
 # ================= MENU =================
 
@@ -100,12 +135,17 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"_id": uid},
             {"$set": {
                 "name": text,
+                "time": "pagi",
+                "location": "rumah",
+                "scene": "awal cerita",
+                "outfit": "pakaian santai",
                 "history": ["Cerita dimulai."],
                 "chars": [],
                 "step": None
             }},
             upsert=True
         )
+
         await update.message.reply_text(
             f"✅ Nama: {text}",
             reply_markup=await get_menu(uid)
@@ -135,72 +175,51 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=await get_menu(uid)
         )
 
-    # ===== NARATOR =====
-    elif step == "input_narator":
-        hist = state.get("history", ["Cerita dimulai."])[-1]
-
-        out = await generate_ai(
-            f"Tulis cerita romcom 2 paragraf.\nInput: {text}\nHistori: {hist}"
-        )
+    # ===== AKSI USER / NARATOR / KARAKTER =====
+    elif step in ["input_aksi_user", "input_narator", "input_char_action"]:
+        state = update_memory_fields(state, text)
 
         await users.update_one(
             {"_id": uid},
-            {"$push": {"history": out}, "$set": {"step": None}}
+            {"$set": {
+                "time": state["time"],
+                "location": state["location"],
+                "scene": state["scene"],
+                "outfit": state["outfit"]
+            }}
         )
 
-        await update.message.reply_text(
-            f"📖 {out}",
-            reply_markup=await get_menu(uid)
-        )
-
-    # ===== AKSI USER =====
-    elif step == "input_aksi_user":
         hist = state.get("history", ["Cerita dimulai."])[-1]
+        memory = build_memory(state)
 
-        out = await generate_ai(
-            f"{state.get('name','Tokoh')} melakukan: {text}\n"
-            f"Lanjutkan romcom 2 paragraf.\nHistori: {hist}"
-        )
+        if step == "input_char_action":
+            idx = state.get("selected_char")
+            char = state.get("chars", [])[idx]
+
+            prompt = (
+                f"{memory}\n"
+                f"{state['name']} melakukan: {text} kepada {char['name']}.\n"
+                f"Deskripsi karakter: {char['desc']}\n"
+                f"JANGAN ubah waktu/lokasi/outfit kecuali disebutkan.\n"
+                f"Histori: {hist}"
+            )
+        else:
+            prompt = (
+                f"{memory}\n"
+                f"{state['name']} melakukan: {text}\n"
+                f"JANGAN ubah waktu/lokasi/outfit kecuali disebutkan.\n"
+                f"Histori: {hist}"
+            )
+
+        out = await generate_ai(prompt)
 
         await users.update_one(
             {"_id": uid},
-            {"$push": {"history": out}, "$set": {"step": None}}
+            {"$push": {"history": out}, "$set": {"step": None, "selected_char": None}}
         )
 
         await update.message.reply_text(
             f"✨ {out}",
-            reply_markup=await get_menu(uid)
-        )
-
-    # ===== INTERAKSI KARAKTER =====
-    elif step == "input_char_action":
-        idx = state.get("selected_char")
-        chars = state.get("chars", [])
-
-        if idx is None or idx >= len(chars):
-            await update.message.reply_text("⚠️ Karakter tidak valid.")
-            return
-
-        char = chars[idx]
-        hist = state.get("history", ["Cerita dimulai."])[-1]
-
-        out = await generate_ai(
-            f"{state.get('name','Tokoh')} melakukan: {text} kepada {char['name']}.\n"
-            f"Deskripsi: {char['desc']}\n"
-            f"Lanjutkan cerita romcom 2 paragraf.\n"
-            f"Histori: {hist}"
-        )
-
-        await users.update_one(
-            {"_id": uid},
-            {
-                "$push": {"history": out},
-                "$set": {"step": None, "selected_char": None}
-            }
-        )
-
-        await update.message.reply_text(
-            f"💕 {out}",
             reply_markup=await get_menu(uid)
         )
 
@@ -212,7 +231,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     await query.answer()
-
     state = await users.find_one({"_id": uid}) or {}
 
     if data == 'narator':
@@ -229,24 +247,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("c_"):
         idx = int(data.split("_")[1])
-        chars = state.get("chars", [])
-
-        if not chars or idx >= len(chars):
-            await query.message.reply_text("⚠️ Karakter tidak valid.")
-            return
-
         await users.update_one(
             {"_id": uid},
             {"$set": {"step": "input_char_action", "selected_char": idx}}
         )
-
-        await query.message.reply_text(f"Aksi ke {chars[idx]['name']}?")
+        await query.message.reply_text("Aksi ke karakter?")
 
     elif data == 'lanjut':
         hist = state.get("history", ["Cerita dimulai."])[-1]
+        memory = build_memory(state)
 
         out = await generate_ai(
-            f"Lanjutkan cerita romcom 2 paragraf:\n{hist}"
+            f"{memory}\nLanjutkan cerita.\nHistori: {hist}"
         )
 
         await users.update_one(
@@ -261,15 +273,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == 'undo':
         hist = state.get("history", [])
-
         if len(hist) > 1:
             hist.pop()
-
-            await users.update_one(
-                {"_id": uid},
-                {"$set": {"history": hist}}
-            )
-
+            await users.update_one({"_id": uid}, {"$set": {"history": hist}})
             await query.message.reply_text(
                 f"↩️ {hist[-1]}",
                 reply_markup=await get_menu(uid)
@@ -283,7 +289,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= RUN =================
 
-defaults = Defaults(parse_mode=None)  # FIX MARKDOWN ERROR
+defaults = Defaults(parse_mode=None)
 
 app = Application.builder().token(BOT_TOKEN).defaults(defaults).build()
 
