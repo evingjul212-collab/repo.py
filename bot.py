@@ -1,7 +1,7 @@
 import os
 import warnings
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Defaults
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, Defaults
 import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -11,7 +11,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # Setup
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-# KONSISTEN: Menggunakan model 2.5 flash
 model = genai.GenerativeModel('gemini-2.5-flash') 
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
@@ -91,7 +90,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hist = state.get('history', ["Cerita dimulai."])
         res = model.generate_content(f"Buat interaksi 2 paragraf antara {state['name']} dan {char['name']}. Deskripsi: {char['desc']}. Histori: {hist[-1]}").text
         await users.update_one({"_id": uid}, {"$push": {"history": res}})
-        # Pakai reply_text agar tidak kena error "not modified"
         await query.message.reply_text(f"💕 {res}", reply_markup=await get_menu(uid))
     elif data == 'reset':
         await users.delete_one({"_id": uid})
@@ -106,7 +104,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await users.update_one({"_id": uid}, {"$push": {"history": res}})
         await query.message.reply_text(f"✨ {res}", reply_markup=await get_menu(uid))
 
-# Gunakan defaults agar parse_mode otomatis Markdown
 defaults = Defaults(parse_mode='Markdown')
 app = Application.builder().token(BOT_TOKEN).defaults(defaults).build()
 
