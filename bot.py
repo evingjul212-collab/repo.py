@@ -38,11 +38,28 @@ async def generate_ai(prompt):
         res = model.generate_content(prompt)
         return trim(safe_text(res))
     except ResourceExhausted:
-        return "⚠️ Limit AI tercapai (free quota). Coba lagi nanti."
+        return "⚠️ Limit AI tercapai (free quota)."
     except Exception as e:
         return f"⚠️ Error AI: {str(e)}"
 
-# ================= MEMORY SYSTEM =================
+# ================= FIX DATA LAMA =================
+
+def ensure_memory(state):
+    if "time" not in state:
+        state["time"] = "pagi"
+    if "location" not in state:
+        state["location"] = "rumah"
+    if "scene" not in state:
+        state["scene"] = "awal cerita"
+    if "outfit" not in state:
+        state["outfit"] = "pakaian santai"
+    if "history" not in state:
+        state["history"] = ["Cerita dimulai."]
+    if "chars" not in state:
+        state["chars"] = []
+    return state
+
+# ================= MEMORY =================
 
 def build_memory(state):
     return (
@@ -55,25 +72,21 @@ def build_memory(state):
 def update_memory_fields(state, text):
     t = text.lower()
 
-    # waktu
     if "malam" in t: state["time"] = "malam"
     elif "sore" in t: state["time"] = "sore"
     elif "siang" in t: state["time"] = "siang"
     elif "pagi" in t: state["time"] = "pagi"
 
-    # lokasi
     if "sekolah" in t: state["location"] = "sekolah"
     elif "pantai" in t: state["location"] = "pantai"
     elif "rumah" in t: state["location"] = "rumah"
     elif "kafe" in t: state["location"] = "kafe"
 
-    # outfit
     if "ganti baju" in t:
         state["outfit"] = "pakaian baru"
 
-    # scene
     if "masuk" in t:
-        state["scene"] = "di dalam ruangan"
+        state["scene"] = "di dalam"
     elif "keluar" in t:
         state["scene"] = "di luar"
 
@@ -82,7 +95,7 @@ def update_memory_fields(state, text):
 # ================= MENU =================
 
 async def get_menu(user_id):
-    state = await users.find_one({"_id": user_id}) or {}
+    state = ensure_memory(await users.find_one({"_id": user_id}) or {})
 
     keyboard = [
         [
@@ -126,10 +139,9 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
 
-    state = await users.find_one({"_id": uid}) or {}
+    state = ensure_memory(await users.find_one({"_id": uid}) or {})
     step = state.get("step")
 
-    # ===== INPUT NAMA =====
     if step == "input_name":
         await users.update_one(
             {"_id": uid},
@@ -151,7 +163,6 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=await get_menu(uid)
         )
 
-    # ===== TAMBAH KARAKTER =====
     elif step == "wait_char_name":
         await users.update_one(
             {"_id": uid},
@@ -175,31 +186,30 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=await get_menu(uid)
         )
 
-    # ===== AKSI USER / NARATOR / KARAKTER =====
     elif step in ["input_aksi_user", "input_narator", "input_char_action"]:
         state = update_memory_fields(state, text)
 
         await users.update_one(
             {"_id": uid},
             {"$set": {
-                "time": state["time"],
-                "location": state["location"],
-                "scene": state["scene"],
-                "outfit": state["outfit"]
+                "time": state.get("time"),
+                "location": state.get("location"),
+                "scene": state.get("scene"),
+                "outfit": state.get("outfit")
             }}
         )
 
-        hist = state.get("history", ["Cerita dimulai."])[-1]
+        hist = state.get("history")[-1]
         memory = build_memory(state)
 
         if step == "input_char_action":
             idx = state.get("selected_char")
-            char = state.get("chars", [])[idx]
+            char = state.get("chars")[idx]
 
             prompt = (
                 f"{memory}\n"
                 f"{state['name']} melakukan: {text} kepada {char['name']}.\n"
-                f"Deskripsi karakter: {char['desc']}\n"
+                f"{char['desc']}\n"
                 f"JANGAN ubah waktu/lokasi/outfit kecuali disebutkan.\n"
                 f"Histori: {hist}"
             )
@@ -207,7 +217,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prompt = (
                 f"{memory}\n"
                 f"{state['name']} melakukan: {text}\n"
-                f"JANGAN ubah waktu/lokasi/outfit kecuali disebutkan.\n"
+                f"JANGAN ubah waktu/lokasi/outfit.\n"
                 f"Histori: {hist}"
             )
 
@@ -231,7 +241,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     await query.answer()
-    state = await users.find_one({"_id": uid}) or {}
+
+    state = ensure_memory(await users.find_one({"_id": uid}) or {})
 
     if data == 'narator':
         await users.update_one({"_id": uid}, {"$set": {"step": "input_narator"}})
@@ -247,14 +258,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("c_"):
         idx = int(data.split("_")[1])
+
         await users.update_one(
             {"_id": uid},
             {"$set": {"step": "input_char_action", "selected_char": idx}}
         )
+
         await query.message.reply_text("Aksi ke karakter?")
 
     elif data == 'lanjut':
-        hist = state.get("history", ["Cerita dimulai."])[-1]
+        hist = state.get("history")[-1]
         memory = build_memory(state)
 
         out = await generate_ai(
@@ -272,7 +285,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == 'undo':
-        hist = state.get("history", [])
+        hist = state.get("history")
+
         if len(hist) > 1:
             hist.pop()
             await users.update_one({"_id": uid}, {"$set": {"history": hist}})
