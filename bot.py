@@ -11,7 +11,7 @@ story_data = {}
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "💘 Romkom 21+ V5.1 💘\nMasukkan nama karakter utama Anda:")
+    bot.send_message(chat_id, "💞 Romkom 21+ V5.2 💞\nMasukkan nama karakter utama Anda:")
     story_data[chat_id] = {
         'main_char': None,
         'other_chars': [],
@@ -29,36 +29,50 @@ def main_handler(message):
         show_main_menu(chat_id)
     
     elif message.text == '1. Narator':
-        bot.send_message(chat_id, "📖 Masukkan prompt narasi cerita (contoh: 'adegan mesra di pantai'):")
+        bot.send_message(chat_id, "📖 Masukkan prompt narasi (contoh: 'adegan mesra di kamar hotel'):")
         bot.register_next_step_handler(message, process_narration)
-        
+    
     elif message.text == '6. Tambah Karakter':
         bot.send_message(chat_id, "👥 Masukkan nama karakter baru:")
         bot.register_next_step_handler(message, add_character)
-
-def process_narration(message):
-    chat_id = message.chat.id
-    prompt = message.text
-    response = model.generate_content(f"Buat adegan romkom dewasa dengan karakter utama {story_data[chat_id]['main_char']}. Prompt: {prompt}")
-    story_data[chat_id]['scenes'].append(response.text)
-    bot.send_message(chat_id, f"✨ Adegan baru:\n\n{response.text}")
-
-def add_character(message):
-    chat_id = message.chat.id
-    new_char = message.text
-    story_data[chat_id]['other_chars'].append(new_char)
-    bot.send_message(chat_id, f"Karakter '{new_char}' telah ditambahkan!")
-    show_main_menu(chat_id)
+    
+    elif any(char in message.text for char in data['other_chars']):
+        char_name = message.text[3:-3]  # Extract from format "✨ Name ✨"
+        ask_character_action(chat_id, char_name)
 
 def show_main_menu(chat_id):
+    """Tampilkan menu dengan tombol karakter utama dan karakter pendukung"""
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(f"🎭 {story_data[chat_id]['main_char']} 🎭")
+    
+    # Tombol karakter utama
+    markup.row(f"✨ {story_data[chat_id]['main_char']} ✨")
+    
+    # Tombol karakter pendukung
+    for char in story_data[chat_id]['other_chars']:
+        markup.row(f"✨ {char} ✨")
+    
+    # Menu utama
     markup.row('1. Narator', '2. Lanjutkan')
     markup.row('3. Save', '4. Load', '5. Reset')
     markup.row('6. Tambah Karakter', '7. Undo')
+    
     bot.send_message(chat_id, 
-        f"Main Character: {story_data[chat_id]['main_char']}\n"
-        f"Other Characters: {', '.join(story_data[chat_id]['other_chars'])}",
+        f"💋 Pilih karakter untuk berinteraksi:",
         reply_markup=markup)
-
+def process_narration(message):
+    chat_id = message.chat.id
+    prompt = f"Buat cerita romkom dewasa dengan:\nKarakter utama: {story_data[chat_id]['main_char']}\nKarakter lain: {', '.join(story_data[chat_id]['other_chars'])}\nPrompt: {message.text}\n(Max 3000 karakter)"
+    
+    try:
+        response = model.generate_content(prompt)
+        # Potong cerita menjadi bagian-bagian 4000 karakter
+        for i in range(0, len(response.text), 4000):
+            part = response.text[i:i+4000]
+            bot.send_message(chat_id, f"📖 Bagian {i//4000 + 1}:\n\n{part}")
+        
+        story_data[chat_id]['scenes'].append(response.text)
+    except Exception as e:
+        bot.send_message(chat_id, f"Error: {str(e)}")
+    
+    show_main_menu(chat_id)
 bot.polling()
