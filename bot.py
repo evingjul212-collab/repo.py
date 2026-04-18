@@ -17,8 +17,8 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-gemini_main = genai.GenerativeModel("gemini-1.5-flash")
-gemini_lite = genai.GenerativeModel("gemini-1.5-flash-8b")
+gemini_main = genai.GenerativeModel("gemini-2.5-flash")
+gemini_lite = genai.GenerativeModel("gemini-3-flash-preview")
 
 # Qwen (fallback)
 client_ai = OpenAI(
