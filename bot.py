@@ -31,7 +31,7 @@ MODEL_ORDER = ["qwen_big", "qwen", "gemini", "llama"]
 
 # Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
 # Mongo
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
