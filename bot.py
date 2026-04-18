@@ -9,7 +9,6 @@ import google.generativeai as genai
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# MODEL PALING AMAN (NO DRAMA)
 MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash"
@@ -19,7 +18,7 @@ client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
 users = db.user_states
 
-# ========= STATE SAFE =========
+# ========= STATE =========
 def fix_state(s):
     if not s:
         s = {}
@@ -56,16 +55,13 @@ async def generate(prompt, uid):
     for m in model_list:
         try:
             model = genai.GenerativeModel(m)
-
             loop = asyncio.get_event_loop()
             res = await loop.run_in_executor(
                 None,
                 lambda: model.generate_content(prompt)
             )
-
             await save(uid, {"model": m})
             return res.text.strip()
-
         except Exception as e:
             print(f"MODEL ERROR {m}: {e}")
             continue
@@ -75,7 +71,6 @@ async def generate(prompt, uid):
 # ========= MENU =========
 async def menu(uid):
     s = await get_state(uid)
-
     kb = []
 
     if s["name"]:
@@ -122,11 +117,13 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = await get_state(uid)
     step = s["step"]
 
+    # ===== NAME =====
     if step == "set_name":
         await save(uid, {"name": text, "step": None})
         await update.message.reply_text("Nama disimpan!", reply_markup=await menu(uid))
         return
 
+    # ===== ADD CHAR =====
     if step == "char_name":
         await save(uid, {"temp_char": text, "step": "char_desc"})
         await update.message.reply_text("Deskripsi karakter:")
@@ -139,27 +136,34 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Karakter ditambahkan!", reply_markup=await menu(uid))
         return
 
+    # ===== MAIN ACTION =====
     if step == "main_action":
         prompt = f"""
-Lanjutkan adegan romcom.
+Fokus utama adalah {s['name']}.
+
 Aksi:
 {text}
 
-JANGAN jelaskan ulang.
-Langsung adegan.
-2 paragraf, banyak dialog.
+Aturan:
+- {s['name']} harus jadi pusat adegan
+- karakter lain hanya merespon
+- jangan menjelaskan ulang input
+
+Tulis 2 paragraf dialog natural.
 """
 
+    # ===== NARATOR =====
     elif step == "narator":
         prompt = f"""
-Ubah ini jadi adegan romcom:
+Ubah ide ini jadi adegan romcom:
 
 {text}
 
 Langsung adegan.
-2 paragraf, dialog natural.
+2 paragraf dialog natural.
 """
 
+    # ===== CHAR ACTION (FIX UTAMA) =====
     elif step == "char_action":
         if s["selected"] is None or s["selected"] >= len(s["chars"]):
             await update.message.reply_text("Karakter error.")
@@ -168,15 +172,23 @@ Langsung adegan.
         c = s["chars"][s["selected"]]
 
         prompt = f"""
-Adegan antara {s['name']} dan {c['name']}.
+Fokus utama adegan adalah {c['name']}.
 
-Aksi:
+Aksi dari {c['name']}:
 {text}
 
-JANGAN jelaskan.
-Langsung dialog.
-2 paragraf.
+Aturan:
+- {c['name']} adalah pusat aksi
+- {c['name']} yang bergerak dan bereaksi
+- {s['name']} hanya merespon
+- jangan membalik fokus ke {s['name']}
+- jangan menjelaskan ulang input
+
+Tulis 2 paragraf:
+- dominan dialog
+- natural
 """
+
     else:
         return
 
@@ -248,7 +260,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "undo":
         hist = s["history"]
-
         if len(hist) > 1:
             hist.pop()
             await save(uid, {"history": hist})
