@@ -7,24 +7,25 @@ from telegram.ext import (
 )
 from motor.motor_asyncio import AsyncIOMotorClient
 from openai import OpenAI
+import google.generativeai as genai
 
 warnings.filterwarnings("ignore")
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
+# Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+gemini_main = genai.GenerativeModel("gemini-2.5-flash")
+gemini_lite = genai.GenerativeModel("gemini-3-flash")
+
+# OpenRouter fallback (Qwen)
 client_ai = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1"
 )
 
-MODELS = {
-    "qwen": "qwen/qwen2.5-7b-instruct",
-    "qwen_big": "qwen/qwen2.5-14b-instruct",
-    "llama": "meta-llama/llama-3-8b-instruct"
-}
-
-MODEL_ORDER = ["qwen_big", "qwen", "llama"]
+QWEN_MODEL = "qwen/qwen2.5-7b-instruct"
 
 # Mongo
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
@@ -40,8 +41,7 @@ def ensure_memory(state):
         "scene": "awal",
         "outfit": "pakaian santai",
         "history": [],
-        "chars": [],
-        "model": "qwen"
+        "chars": []
     }
     for k, v in defaults.items():
         if k not in state:
@@ -70,81 +70,68 @@ WAJIB:
 - Minimal 60% dialog
 - Jangan langsung konflik ekstrem
 - Jangan absurd
-- Reaksi harus manusiawi
+- Reaksi manusiawi
+- Mulai dari narasi jika scene baru
 """
 
 def prompt_narator(memory, text):
-    return f"""
-{memory}
-
-TUGAS:
-Ubah input jadi adegan cerita.
-
-ATURAN:
-- Mulai dari narasi (contoh: "Sore itu...")
-- Bangun suasana dulu
-- Baru masuk dialog
-- Jangan langsung konflik berat
-
-INPUT:
-{text}
-"""
+    return f"{memory}\n\nBuat adegan dari input ini:\n{text}"
 
 def prompt_lanjut(memory, hist):
-    return f"""
-{memory}
-
-LANJUTKAN cerita ini:
-
-{hist}
-"""
+    return f"{memory}\n\nLanjutkan cerita:\n{hist}"
 
 def prompt_interaksi(memory, hist, char_name, text):
-    return f"""
-{memory}
-
-KONTEKS:
-{hist}
-
-FOKUS:
-Reaksi {char_name}
-
-INPUT:
-{text}
-"""
+    return f"{memory}\n\nKonteks:\n{hist}\n\nTampilkan reaksi {char_name} terhadap:\n{text}"
 
 # ================= VALIDASI =================
 
 def validate(text):
     if not text or len(text.split()) < 20:
         return False
-    if any(x in text.lower() for x in [" i ", " you ", " the "]):
+    if any(w in text.lower() for w in [" i ", " you ", " the "]):
         return False
     return True
 
 # ================= AI =================
 
-async def generate_ai(prompt, model):
-    res = client_ai.chat.completions.create(
-        model=MODELS[model],
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.8,
-        max_tokens=700
-    )
-    return res.choices[0].message.content.strip()
+async def generate_gemini(prompt, model):
+    try:
+        res = model.generate_content(SYSTEM_PROMPT + "\n" + prompt)
+        return res.text if res.text else None
+    except:
+        return None
+
+async def generate_qwen(prompt):
+    try:
+        res = client_ai.chat.completions.create(
+            model=QWEN_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=700
+        )
+        return res.choices[0].message.content.strip()
+    except:
+        return None
 
 async def smart_generate(prompt):
-    for m in MODEL_ORDER:
-        for _ in range(2):
-            try:
-                out = await generate_ai(prompt, m)
-                if validate(out):
-                    return out, m
-            except:
-                continue
+    # 1. Gemini utama
+    out = await generate_gemini(prompt, gemini_main)
+    if validate(out):
+        return out, "gemini-main"
+
+    # 2. Gemini lite
+    out = await generate_gemini(prompt, gemini_lite)
+    if validate(out):
+        return out, "gemini-lite"
+
+    # 3. Qwen fallback
+    out = await generate_qwen(prompt)
+    if validate(out):
+        return out, "qwen"
+
     return None, None
 
 # ================= MENU =================
@@ -159,11 +146,6 @@ async def get_menu(uid):
          InlineKeyboardButton("🔄 Reset", callback_data="reset")],
         [InlineKeyboardButton("↩️ Undo", callback_data="undo")]
     ]
-
-    if state.get("name"):
-        keyboard.insert(0, [
-            InlineKeyboardButton(f"👤 {state['name']}", callback_data="aksi_user")
-        ])
 
     for i, c in enumerate(state.get("chars", [])):
         keyboard.append([
@@ -215,9 +197,6 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == "narator":
         prompt = prompt_narator(memory, text)
 
-    elif step == "aksi_user":
-        prompt = prompt_lanjut(memory, hist + "\nAksi: " + text)
-
     elif step == "char_react":
         char = state["chars"][state["selected_char"]]
         prompt = prompt_interaksi(memory, hist, char["name"], text)
@@ -228,15 +207,13 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     out, model = await smart_generate(prompt)
 
     if not out:
-        await update.message.reply_text("❌ Semua model gagal")
+        await update.message.reply_text("❌ AI gagal semua")
         return
 
     history = state.get("history", [])
     history.append(out)
 
-    await users.update_one({"_id": uid}, {
-        "$set": {"history": history, "step": None}
-    })
+    await users.update_one({"_id": uid}, {"$set": {"history": history, "step": None}})
 
     await update.message.reply_text(f"🔹 {model}\n\n{out}", reply_markup=await get_menu(uid))
 
@@ -246,7 +223,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
     data = q.data
-    await q.answer()
+
+    try:
+        await q.answer()
+    except:
+        pass
 
     if data == "narator":
         await users.update_one({"_id": uid}, {"$set": {"step": "narator"}})
