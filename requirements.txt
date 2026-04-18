@@ -1,4 +1,3 @@
-python-telegram-bot==20.7
+python-telegram-bot
 motor
-openai>=1.0.0
-google-generativeai
+google-genai
