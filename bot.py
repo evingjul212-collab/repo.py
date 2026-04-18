@@ -18,20 +18,23 @@ client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
 users = db.user_states
 
-# ========= STATE SAFE =========
+# ========= AUTO FIX STATE =========
 def fix_state(s):
     if not s:
         s = {}
-    s.setdefault("name", None)
-    s.setdefault("step", None)
-    s.setdefault("history", [])
-    s.setdefault("chars", [])
-    s.setdefault("last_prompt", None)
-    s.setdefault("temp_char", None)
-    s.setdefault("selected", None)
-    s.setdefault("force_model", None)
-    s.setdefault("model", None)
-    return s
+
+    return {
+        "_id": s.get("_id"),
+        "name": s.get("name"),
+        "step": s.get("step"),
+        "history": s.get("history", []),
+        "chars": s.get("chars", []),
+        "last_prompt": s.get("last_prompt"),
+        "temp_char": s.get("temp_char"),
+        "selected": s.get("selected"),
+        "force_model": s.get("force_model"),
+        "model": s.get("model")
+    }
 
 async def get_state(uid):
     s = await users.find_one({"_id": uid})
@@ -106,7 +109,12 @@ def err_menu():
 
 # ========= START =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await save(update.effective_user.id, {"step": "set_name"})
+    await save(update.effective_user.id, {
+        "name": None,
+        "step": "set_name",
+        "history": [],
+        "chars": []
+    })
     await update.message.reply_text("Masukkan nama tokoh utama:")
 
 # ========= MESSAGE =========
@@ -144,13 +152,13 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ===== TOKOH UTAMA =====
     if step == "main_action":
-        prompt = f"{s['name']} melakukan: {text}. Lanjutkan cerita romcom 2 paragraf, fokus dialog."
+        prompt = f"{s['name']} melakukan: {text}. Lanjutkan cerita romcom 2 paragraf dengan dialog."
 
     # ===== NARATOR =====
     elif step == "narator":
         prompt = f"Ubah jadi adegan cerita romcom 2 paragraf dengan dialog: {text}"
 
-    # ===== INTERAKSI KARAKTER =====
+    # ===== INTERAKSI =====
     elif step == "char_action":
         if s["selected"] is None or s["selected"] >= len(s["chars"]):
             await update.message.reply_text("Karakter error.")
@@ -273,7 +281,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.message.reply_text("Model: Gemini 2.5")
 
     elif data == "m_15":
-        await save(uid, {"force_model": "gemini-3-flash-previe"})
+        await save(uid, {"force_model": "gemini-3-flash-preview"})
         await q.message.reply_text("Model: Gemini 3")
 
 # ========= RUN =========
