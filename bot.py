@@ -3,26 +3,26 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from motor.motor_asyncio import AsyncIOMotorClient
-import google.generativeai as genai
+# MENGGUNAKAN SDK BARU UNTUK TAHUN 2026
+from google import genai
 
 # ========= CONFIG =========
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# Inisialisasi Client Baru sesuai standar terbaru
+client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Variasi nama model untuk menghindari Error 404 & 429
+# Daftar model resmi yang pasti ada di server Google
 MODELS = [
-    "models/gemini-1.5-flash",
+    "gemini-2.0-flash", 
     "gemini-1.5-flash",
-    "models/gemini-1.5-flash-8b",
-    "gemini-1.5-pro",
-    "gemini-pro"
+    "gemini-1.5-pro"
 ]
 
-client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
-db = client.game_db
+client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
+db = client_db.game_db
 users = db.user_states
 
-# ========= STATE =========
+# ========= STATE LOGIC =========
 def fix_state(s):
     if not s: s = {}
     return {
@@ -54,68 +54,45 @@ async def save(uid, data):
 def build_system(s):
     st = s["story"]
     char_list = ", ".join([c['name'] for c in s['chars']])
-    
     return f"""
 KONTROL ENGINE RPG:
-- Setting Utama: {st['setting']} | Waktu: {st['time']}
+- Setting: {st['setting']} | Waktu: {st['time']}
 - Karakter: {s['name']} (User), {char_list}
-
-PROTOKOL KONSISTENSI:
-1. LOGIKA FISIK: Wajib ingat posisi terakhir karakter. Jangan berubah tanpa aksi.
-2. POV TERKUNCI: Tulis narasi & dialog HANYA untuk karakter yang dipilih.
-3. ANTI-AMNESIA: Gunakan memori alur untuk menjaga kesinambungan.
-4. OUTPUT: Maksimal 2 paragraf pendek.
-5. DILARANG mengontrol dialog/pikiran karakter lain.
+PROTOKOL: Wajib konsisten posisi fisik, POV terkunci pada karakter terpilih, 1-2 paragraf saja.
 """
 
-# ========= AI GENERATOR =========
+# ========= AI GENERATOR (LOGIKA 2026) =========
 async def generate(prompt, system, history):
     context = "\n---\n".join(history[-12:]) if history else "Cerita dimulai."
-    
     full_input = f"{system}\n\n--- MEMORI ---\n{context}\n\n--- INSTRUKSI ---\n{prompt}"
     
     for m in MODELS:
         try:
-            model = genai.GenerativeModel(m)
-            loop = asyncio.get_event_loop()
-            res = await loop.run_in_executor(
-                None, 
-                lambda: model.generate_content(full_input)
+            # Cara panggil baru: client_ai.models.generate_content
+            response = client_ai.models.generate_content(
+                model=m,
+                contents=full_input
             )
-            # Mengembalikan teks dan nama model yang aktif
-            return res.text.strip().replace("```", ""), m
+            return response.text.strip(), m
         except Exception as e:
-            print(f"DEBUG: Model {m} gagal. Error: {e}")
+            print(f"DEBUG: Model {m} gagal di Railway. Error: {e}")
             continue
     return None, None
 
-# ========= INTERFACE =========
+# ========= INTERFACE & HANDLERS =========
 async def menu(uid):
     s = await get_state(uid)
     kb = []
-    if s["name"]:
-        kb.append([InlineKeyboardButton(f"👤 POV: {s['name']}", callback_data="main")])
-
-    kb.append([
-        InlineKeyboardButton("🎭 Narator", callback_data="narator"),
-        InlineKeyboardButton("⏩ Lanjut", callback_data="lanjut")
-    ])
-
-    for i, c in enumerate(s["chars"]):
-        kb.append([InlineKeyboardButton(f"💬 POV: {c['name']}", callback_data=f"char_{i}")])
-
+    if s["name"]: kb.append([InlineKeyboardButton(f"👤 POV: {s['name']}", callback_data="main")])
+    kb.append([InlineKeyboardButton("🎭 Narator", callback_data="narator"), InlineKeyboardButton("⏩ Lanjut", callback_data="lanjut")])
+    for i, c in enumerate(s["chars"]): kb.append([InlineKeyboardButton(f"💬 POV: {c['name']}", callback_data=f"char_{i}")])
     kb.append([InlineKeyboardButton("➕ Tambah Karakter", callback_data="add_char")])
-    kb.append([
-        InlineKeyboardButton("↩️ Undo", callback_data="undo"),
-        InlineKeyboardButton("🔄 Regen", callback_data="regen")
-    ])
-
+    kb.append([InlineKeyboardButton("↩️ Undo", callback_data="undo"), InlineKeyboardButton("🔄 Regen", callback_data="regen")])
     return InlineKeyboardMarkup(kb)
 
-# ========= HANDLERS =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await save(update.effective_user.id, {"name": None, "step": "set_name", "history": [], "chars": []})
-    await update.message.reply_text("🎮 RPG Engine Ready.\nMasukkan nama Tokoh Utama:")
+    await update.message.reply_text("🎮 RPG Engine Railway Ready.\nMasukkan nama Tokoh Utama:")
 
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -140,12 +117,12 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if s["step"] == "main_action":
-        prompt = f"POV {s['name']}: {text}. Fokus respon {s['name']}."
+        prompt = f"POV {s['name']}: {text}."
     elif s["step"] == "char_action":
         c = s["chars"][s["selected"]]
         prompt = f"POV {c['name']}: Reaksi terhadap {s['name']} -> {text}."
     elif s["step"] == "narator":
-        prompt = f"NARASI: {text}. Tanpa dialog."
+        prompt = f"NARASI: {text}."
     else: return
 
     await save(uid, {"last_prompt": prompt})
@@ -154,11 +131,9 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if out:
         s["history"].append(out)
         await save(uid, {"history": s["history"], "step": None})
-        # Menampilkan model di akhir pesan
-        response_text = f"{out}\n\n[🤖 Model: {model_name}]"
-        await update.message.reply_text(response_text, reply_markup=await menu(uid))
+        await update.message.reply_text(f"{out}\n\n[🤖 Model: {model_name}]", reply_markup=await menu(uid))
     else:
-        await update.message.reply_text("Gagal memanggil AI. Coba lagi nanti.")
+        await update.message.reply_text("Gagal memanggil AI. Cek Variable Environment di Railway kamu.")
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -167,36 +142,20 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try: await q.answer()
     except: pass
 
-    if q.data == "main":
-        await save(uid, {"step": "main_action"})
-        await q.message.reply_text(f"Apa yang dilakukan {s['name']}?")
+    if q.data == "main": await save(uid, {"step": "main_action"}); await q.message.reply_text(f"Aksi {s['name']}?")
     elif q.data.startswith("char_"):
-        idx = int(q.data.split("_")[1])
-        await save(uid, {"step": "char_action", "selected": idx})
-        await q.message.reply_text(f"Apa reaksi {s['chars'][idx]['name']}?")
-    elif q.data == "add_char":
-        await save(uid, {"step": "char_name"})
-        await q.message.reply_text("Nama karakter baru?")
-    elif q.data == "narator":
-        await save(uid, {"step": "narator"})
-        await q.message.reply_text("Apa yang terjadi?")
+        idx = int(q.data.split("_")[1]); await save(uid, {"step": "char_action", "selected": idx})
+        await q.message.reply_text(f"Reaksi {s['chars'][idx]['name']}?")
+    elif q.data == "add_char": await save(uid, {"step": "char_name"}); await q.message.reply_text("Nama karakter?")
+    elif q.data == "narator": await save(uid, {"step": "narator"}); await q.message.reply_text("Apa yang terjadi?")
     elif q.data == "lanjut":
-        out, model_name = await generate("Lanjutkan narasi sesuai posisi terakhir.", build_system(s), s["history"])
-        if out:
-            s["history"].append(out)
-            await save(uid, {"history": s["history"]})
-            await q.message.reply_text(f"{out}\n\n[🤖 Model: {model_name}]", reply_markup=await menu(uid))
+        out, model_name = await generate("Lanjutkan alur cerita.", build_system(s), s["history"])
+        if out: s["history"].append(out); await save(uid, {"history": s["history"]}); await q.message.reply_text(f"{out}\n\n[🤖 Model: {model_name}]", reply_markup=await menu(uid))
     elif q.data == "undo":
-        if len(s["history"]) > 1:
-            s["history"].pop()
-            await save(uid, {"history": s["history"]})
-            await q.message.reply_text(f"--- Undo Success ---\n\n{s['history'][-1]}", reply_markup=await menu(uid))
+        if len(s["history"]) > 1: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text(f"--- Undo ---\n{s['history'][-1]}", reply_markup=await menu(uid))
     elif q.data == "regen":
         out, model_name = await generate(s.get("last_prompt") + " (Variasikan)", build_system(s), s["history"][:-1])
-        if out:
-            s["history"][-1] = out
-            await save(uid, {"history": s["history"]})
-            await q.message.reply_text(f"{out}\n\n[🤖 Model: {model_name}]", reply_markup=await menu(uid))
+        if out: s["history"][-1] = out; await save(uid, {"history": s["history"]}); await q.message.reply_text(f"{out}\n\n[🤖 Model: {model_name}]", reply_markup=await menu(uid))
 
 # ========= RUN =========
 if __name__ == "__main__":
@@ -204,5 +163,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
-    print("RPG BOT RUNNING WITH MODEL TRACKER...")
+    print("BOT DEPLOYED ON RAILWAY (GENAI SDK 2026)...")
     app.run_polling(drop_pending_updates=True)
