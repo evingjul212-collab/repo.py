@@ -8,12 +8,14 @@ from telegram.ext import (
 )
 from motor.motor_asyncio import AsyncIOMotorClient
 from openai import OpenAI
+import google.generativeai as genai
 
 warnings.filterwarnings("ignore")
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
+# OpenRouter (Qwen & Llama)
 client_ai = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1"
@@ -25,11 +27,18 @@ MODELS = {
     "llama": "meta-llama/llama-3-8b-instruct"
 }
 
+MODEL_ORDER = ["qwen_big", "qwen", "gemini", "llama"]
+
+# Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+
+# Mongo
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
 users = db.user_states
 
-# ================= UTIL =================
+# ================= MEMORY =================
 
 def ensure_memory(state):
     defaults = {
@@ -57,18 +66,23 @@ def build_memory(state):
 def get_context(state):
     return "\n".join(state.get("history", [])[-3:])
 
+# ================= PROMPT =================
+
+SYSTEM_PROMPT = """
+Kamu penulis romcom realistis.
+
+WAJIB:
+- 100% Bahasa Indonesia
+- Maksimal 2 paragraf
+- Minimal 60% dialog
+- Jangan asumsi tanpa konteks
+- Jangan absurd / random
+- Lanjutkan cerita secara logis
+"""
+
 def build_prompt(memory, hist, action):
     return f"""
 {memory}
-
-LANJUTKAN CERITA ROMCOM.
-
-RULE:
-- Maksimal 2 paragraf
-- Minimal 60% dialog
-- Gunakan tanda kutip
-- Jangan ubah waktu/lokasi/outfit
-- Lanjutkan natural
 
 KONTEKS:
 {hist}
@@ -77,40 +91,56 @@ AKSI:
 {action}
 """
 
+# ================= VALIDATION =================
+
+def validate_output(text):
+    t = text.lower()
+
+    if len(text.split()) < 20:
+        return False
+
+    if any(w in t for w in [" i ", " you ", " the "]):
+        return False
+
+    if "mengandung" in t and "hamil" in t:
+        return False
+
+    return True
+
 # ================= AI =================
 
-async def generate_ai(prompt, state):
-    model_key = state.get("model", "qwen")
+async def generate_qwen(prompt, model):
+    res = client_ai.chat.completions.create(
+        model=MODELS[model],
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.8,
+        max_tokens=700
+    )
+    return res.choices[0].message.content.strip()
 
-    try:
-        res = client_ai.chat.completions.create(
-            model=MODELS[model_key],
-            messages=[
-                {"role": "system", "content": "Penulis romcom dialog natural."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=700,
-            temperature=0.9
-        )
-        return res.choices[0].message.content.strip(), None
+async def generate_gemini(prompt):
+    res = gemini_model.generate_content(SYSTEM_PROMPT + "\n" + prompt)
+    return res.text if res.text else None
 
-    except Exception:
-        fallback = "llama" if model_key != "llama" else "qwen"
+async def smart_generate(prompt, state):
+    for model_key in MODEL_ORDER:
+        for _ in range(2):
+            try:
+                if model_key == "gemini":
+                    out = await generate_gemini(prompt)
+                else:
+                    out = await generate_qwen(prompt, model_key)
 
-        try:
-            res = client_ai.chat.completions.create(
-                model=MODELS[fallback],
-                messages=[
-                    {"role": "system", "content": "Penulis romcom dialog natural."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=700,
-                temperature=0.9
-            )
-            return res.choices[0].message.content.strip(), f"⚠️ Model diganti ke {fallback}"
+                if out and validate_output(out):
+                    return out, f"🔹 {model_key}"
 
-        except Exception:
-            return None, "❌ Semua model error"
+            except:
+                continue
+
+    return None, "❌ Semua model gagal"
 
 # ================= MENU =================
 
@@ -190,11 +220,11 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             action = text
 
         prompt = build_prompt(memory, hist, action)
-        out, err = await generate_ai(prompt, state)
+        out, model_used = await smart_generate(prompt, state)
 
         if not out:
             keyboard = [[InlineKeyboardButton("🔄 Ganti Model", callback_data="ganti_model")]]
-            await update.message.reply_text(err, reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text(model_used, reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
         history = state.get("history", [])
@@ -206,9 +236,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "selected_char": None
         }})
 
-        msg_text = (err + "\n\n" if err else "") + out
-
-        await update.message.reply_text(msg_text, reply_markup=await get_menu(uid))
+        await update.message.reply_text(f"{model_used}\n\n{out}", reply_markup=await get_menu(uid))
 
 # ================= BUTTON =================
 
@@ -224,6 +252,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("Qwen Cepat", callback_data="set_qwen")],
             [InlineKeyboardButton("Qwen Pintar", callback_data="set_qwen_big")],
+            [InlineKeyboardButton("Gemini", callback_data="set_gemini")],
             [InlineKeyboardButton("Llama", callback_data="set_llama")]
         ]
         await query.message.reply_text("Pilih model:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -250,11 +279,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         memory = build_memory(state)
         hist = get_context(state)
 
-        out, err = await generate_ai(build_prompt(memory, hist, "lanjutkan"), state)
+        out, model_used = await smart_generate(build_prompt(memory, hist, "lanjutkan"), state)
 
         if not out:
             keyboard = [[InlineKeyboardButton("🔄 Ganti Model", callback_data="ganti_model")]]
-            await query.message.reply_text(err, reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.message.reply_text(model_used, reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
         history = state.get("history", [])
@@ -262,7 +291,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await users.update_one({"_id": uid}, {"$set": {"history": history}})
 
-        await query.message.reply_text((err + "\n\n" if err else "") + out, reply_markup=await get_menu(uid))
+        await query.message.reply_text(f"{model_used}\n\n{out}", reply_markup=await get_menu(uid))
 
     elif data == "undo":
         history = state.get("history", [])
