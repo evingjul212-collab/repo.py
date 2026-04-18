@@ -1,5 +1,4 @@
 import os
-import warnings
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -7,188 +6,139 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 from motor.motor_asyncio import AsyncIOMotorClient
-from openai import OpenAI
 import google.generativeai as genai
-
-warnings.filterwarnings("ignore")
 
 # ========= CONFIG =========
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-gemini_main = genai.GenerativeModel("gemini-2.5-flash")
-gemini_lite = genai.GenerativeModel("gemini-3-flash-preview")
-
-client_ai = OpenAI(
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    base_url="https://openrouter.ai/api/v1"
-)
-QWEN_MODEL = "qwen/qwen2.5-7b-instruct"
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
 users = db.user_states
 
-# ========= MEMORY =========
-def ensure_memory(state):
-    defaults = {
-        "time": "sore",
-        "location": "rumah",
-        "scene": "awal",
-        "outfit": "pakaian santai",
+# ========= BASIC =========
+def default_state():
+    return {
+        "name": None,
+        "step": None,
         "history": [],
-        "chars": []
+        "chars": [],
+        "last_prompt": None
     }
-    for k, v in defaults.items():
-        if k not in state:
-            state[k] = v
+
+async def get_state(uid):
+    state = await users.find_one({"_id": uid})
+    if not state:
+        state = default_state()
+        await users.insert_one({"_id": uid, **state})
     return state
 
-def build_memory(state):
-    return f"Waktu: {state['time']}\nLokasi: {state['location']}\nScene: {state['scene']}\nOutfit: {state['outfit']}"
-
-def get_context(state):
-    return "\n".join(state.get("history", [])[-3:])
-
-# ========= PROMPT =========
-SYSTEM_PROMPT = """
-Kamu penulis romcom realistis.
-- Bahasa Indonesia natural
-- Maksimal 2 paragraf
-- Fokus dialog
-- Reaksi manusia normal
-- Jangan absurd
-"""
-
-def prompt_narator(memory, text):
-    return f"{memory}\n\nBuat adegan dari input ini (mulai dari narasi dulu):\n{text}"
-
-def prompt_lanjut(memory, hist):
-    return f"{memory}\n\nLanjutkan cerita ini:\n{hist}"
-
-def prompt_main(memory, hist, name, action):
-    return f"{memory}\n\nKonteks:\n{hist}\n\n{name} melakukan:\n{action}\n\nLanjutkan secara natural."
-
-def prompt_interaksi(memory, hist, char, text):
-    return f"{memory}\n\nKonteks:\n{hist}\n\nTampilkan reaksi {char} terhadap:\n{text}"
-
-# ========= VALIDASI =========
-def validate(text):
-    return text and len(text.split()) > 8
+async def save(uid, data):
+    await users.update_one({"_id": uid}, {"$set": data})
 
 # ========= AI =========
-async def gen_gemini(prompt, model):
+async def generate(prompt):
     try:
         loop = asyncio.get_event_loop()
         res = await loop.run_in_executor(
             None,
-            lambda: model.generate_content(SYSTEM_PROMPT + "\n" + prompt)
+            lambda: model.generate_content(prompt)
         )
-        return res.text.strip() if res and hasattr(res, "text") else None
+        return res.text.strip()
     except:
         return None
 
-async def gen_qwen(prompt):
-    try:
-        res = client_ai.chat.completions.create(
-            model=QWEN_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return res.choices[0].message.content.strip()
-    except:
-        return None
-
-async def smart_generate(prompt, force=None):
-    if force == "qwen":
-        out = await gen_qwen(prompt)
-        if validate(out): return out, "qwen"
-
-    out = await gen_gemini(prompt, gemini_main)
-    if validate(out): return out, "gemini"
-
-    out = await gen_gemini(prompt, gemini_lite)
-    if validate(out): return out, "gemini-lite"
-
-    out = await gen_qwen(prompt)
-    if validate(out): return out, "qwen"
-
-    return None, None
-
-# ========= UI =========
-def error_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔁 Coba Lagi", callback_data="retry")],
-        [InlineKeyboardButton("↩️ Undo", callback_data="undo")],
-        [InlineKeyboardButton("🔄 Ganti Model", callback_data="switch_model")]
-    ])
-
-async def get_menu(uid):
-    state = ensure_memory(await users.find_one({"_id": uid}) or {})
+# ========= MENU =========
+async def menu(uid):
+    state = await get_state(uid)
 
     kb = []
-    if state.get("name"):
-        kb.append([InlineKeyboardButton(f"👤 {state['name']}", callback_data="main_char")])
+
+    if state["name"]:
+        kb.append([InlineKeyboardButton(f"👤 {state['name']}", callback_data="main")])
 
     kb += [
         [InlineKeyboardButton("📖 Narator", callback_data="narator"),
          InlineKeyboardButton("➡️ Lanjut", callback_data="lanjut")],
-        [InlineKeyboardButton("➕ Karakter", callback_data="tambah"),
-         InlineKeyboardButton("🔄 Reset", callback_data="reset")],
-        [InlineKeyboardButton("↩️ Undo", callback_data="undo")]
+        [InlineKeyboardButton("➕ Karakter", callback_data="add_char"),
+         InlineKeyboardButton("↩️ Undo", callback_data="undo")]
     ]
 
-    for i, c in enumerate(state.get("chars", [])):
+    for i, c in enumerate(state["chars"]):
         kb.append([InlineKeyboardButton(f"💬 {c['name']}", callback_data=f"char_{i}")])
 
     return InlineKeyboardMarkup(kb)
 
-# ========= HANDLER =========
+def error_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Retry", callback_data="retry")],
+        [InlineKeyboardButton("↩️ Undo", callback_data="undo")]
+    ])
+
+# ========= START =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await users.update_one({"_id": update.effective_user.id},
-                           {"$set": {"step": "input_name"}}, upsert=True)
+    await save(update.effective_user.id, {"step": "set_name"})
     await update.message.reply_text("Nama tokoh utama?")
 
+# ========= MESSAGE =========
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
-    state = ensure_memory(await users.find_one({"_id": uid}) or {})
-    step = state.get("step")
+    state = await get_state(uid)
+    step = state["step"]
 
-    if step == "input_name":
-        await users.update_one({"_id": uid}, {"$set": {"name": text, "step": None}})
-        await update.message.reply_text("Nama disimpan!", reply_markup=await get_menu(uid))
+    # ===== SET NAME =====
+    if step == "set_name":
+        await save(uid, {"name": text, "step": None})
+        await update.message.reply_text("Nama disimpan!", reply_markup=await menu(uid))
         return
 
-    memory = build_memory(state)
-    hist = get_context(state)
+    # ===== TAMBAH KARAKTER =====
+    if step == "char_name":
+        await save(uid, {"temp_char": text, "step": "char_desc"})
+        await update.message.reply_text("Deskripsi karakter?")
+        return
 
-    if step == "narator":
-        prompt = prompt_narator(memory, text)
-    elif step == "main_action":
-        prompt = prompt_main(memory, hist, state["name"], text)
-    elif step == "char_react":
-        char = state["chars"][state["selected_char"]]["name"]
-        prompt = prompt_interaksi(memory, hist, char, text)
+    if step == "char_desc":
+        chars = state["chars"]
+        chars.append({"name": state["temp_char"], "desc": text})
+        await save(uid, {"chars": chars, "step": None, "temp_char": ""})
+        await update.message.reply_text("Karakter ditambahkan!", reply_markup=await menu(uid))
+        return
+
+    # ===== AKSI TOKOH UTAMA =====
+    if step == "main_action":
+        prompt = f"{state['name']} melakukan: {text}. Lanjutkan cerita 2 paragraf."
+    
+    # ===== NARATOR =====
+    elif step == "narator":
+        prompt = f"Buat adegan dari ini: {text}. 2 paragraf."
+
+    # ===== INTERAKSI KARAKTER =====
+    elif step == "char_action":
+        char = state["chars"][state["selected"]]
+        prompt = f"Reaksi {char['name']} terhadap: {text}. 2 paragraf."
+
     else:
         return
 
-    await users.update_one({"_id": uid}, {"$set": {"last_prompt": prompt}})
+    await save(uid, {"last_prompt": prompt})
 
-    out, model = await smart_generate(prompt, state.get("force_model"))
+    out = await generate(prompt)
 
     if not out:
-        await update.message.reply_text("⚠️ AI gagal / limit.", reply_markup=error_menu())
+        await update.message.reply_text("AI error", reply_markup=error_menu())
         return
 
-    history = state.get("history", [])
+    history = state["history"]
     history.append(out)
-    await users.update_one({"_id": uid}, {"$set": {"history": history, "step": None}})
 
-    await update.message.reply_text(f"🔹 {model}\n\n{out}", reply_markup=await get_menu(uid))
+    await save(uid, {"history": history, "step": None})
 
+    await update.message.reply_text(out, reply_markup=await menu(uid))
+
+# ========= BUTTON =========
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
@@ -199,66 +149,70 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         pass
 
-    state = ensure_memory(await users.find_one({"_id": uid}) or {})
+    state = await get_state(uid)
 
-    if data == "main_char":
-        await users.update_one({"_id": uid}, {"$set": {"step": "main_action"}})
-        await q.message.reply_text("Apa yang dilakukan tokoh utama?")
-    
-    elif data == "retry":
-        prompt = state.get("last_prompt")
-        out, model = await smart_generate(prompt, state.get("force_model"))
-        if not out:
-            await q.message.reply_text("❌ Masih gagal", reply_markup=error_menu())
+    # ===== TOKOH UTAMA =====
+    if data == "main":
+        await save(uid, {"step": "main_action"})
+        await q.message.reply_text("Aksi tokoh utama?")
+
+    # ===== NARATOR =====
+    elif data == "narator":
+        await save(uid, {"step": "narator"})
+        await q.message.reply_text("Masukkan cerita:")
+
+    # ===== LANJUT =====
+    elif data == "lanjut":
+        if not state["history"]:
+            await q.message.reply_text("Belum ada cerita.")
             return
 
-        history = state.get("history", [])
-        history.append(out)
-        await users.update_one({"_id": uid}, {"$set": {"history": history}})
-        await q.message.reply_text(f"🔹 {model}\n\n{out}", reply_markup=await get_menu(uid))
+        prompt = f"Lanjutkan: {state['history'][-1]}"
+        out = await generate(prompt)
 
+        if out:
+            history = state["history"]
+            history.append(out)
+            await save(uid, {"history": history})
+            await q.message.reply_text(out, reply_markup=await menu(uid))
+
+    # ===== TAMBAH KARAKTER =====
+    elif data == "add_char":
+        await save(uid, {"step": "char_name"})
+        await q.message.reply_text("Nama karakter?")
+
+    # ===== INTERAKSI KARAKTER =====
+    elif data.startswith("char_"):
+        idx = int(data.split("_")[1])
+        await save(uid, {"step": "char_action", "selected": idx})
+        await q.message.reply_text("Aksi ke karakter ini?")
+
+    # ===== UNDO =====
     elif data == "undo":
-        history = state.get("history", [])
+        history = state["history"]
         if len(history) > 1:
-            history = history[:-1]
-            await users.update_one({"_id": uid}, {"$set": {"history": history}})
-            await q.message.reply_text(history[-1], reply_markup=await get_menu(uid))
+            history.pop()
+            await save(uid, {"history": history})
+            await q.message.reply_text(history[-1], reply_markup=await menu(uid))
         else:
             await q.message.reply_text("Tidak bisa undo.")
 
-    elif data == "switch_model":
-        new_model = "qwen" if state.get("force_model") != "qwen" else None
-        await users.update_one({"_id": uid}, {"$set": {"force_model": new_model}})
-        await q.message.reply_text("Model diganti. Tekan Coba Lagi.")
+    # ===== RETRY =====
+    elif data == "retry":
+        prompt = state.get("last_prompt")
+        if not prompt:
+            await q.message.reply_text("Tidak ada data.")
+            return
 
-    elif data == "narator":
-        await users.update_one({"_id": uid}, {"$set": {"step": "narator"}})
-        await q.message.reply_text("Masukkan cerita:")
+        out = await generate(prompt)
 
-    elif data == "lanjut":
-        memory = build_memory(state)
-        hist = get_context(state)
-        prompt = prompt_lanjut(memory, hist)
-
-        out, model = await smart_generate(prompt)
         if out:
-            history = state.get("history", [])
+            history = state["history"]
             history.append(out)
-            await users.update_one({"_id": uid}, {"$set": {"history": history}})
-            await q.message.reply_text(f"🔹 {model}\n\n{out}", reply_markup=await get_menu(uid))
-
-    elif data.startswith("char_"):
-        idx = int(data.split("_")[1])
-        await users.update_one({"_id": uid}, {"$set": {"step": "char_react", "selected_char": idx}})
-        await q.message.reply_text(f"Reaksi {state['chars'][idx]['name']}:")
-
-    elif data == "tambah":
-        await users.update_one({"_id": uid}, {"$set": {"step": "wait_char"}})
-        await q.message.reply_text("Nama karakter:")
-
-    elif data == "reset":
-        await users.delete_one({"_id": uid})
-        await q.message.reply_text("Reset. /start lagi")
+            await save(uid, {"history": history})
+            await q.message.reply_text(out, reply_markup=await menu(uid))
+        else:
+            await q.message.reply_text("Masih error.")
 
 # ========= RUN =========
 app = Application.builder().token(BOT_TOKEN).build()
@@ -267,5 +221,5 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
 
-print("🚀 BOT RUNNING...")
-app.run_polling()
+print("BOT RUNNING...")
+app.run_polling(drop_pending_updates=True)
