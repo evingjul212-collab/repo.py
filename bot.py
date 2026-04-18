@@ -50,27 +50,45 @@ async def get_state(uid):
 async def save(uid, data):
     await users.update_one({"_id": uid}, {"$set": data}, upsert=True)
 
-# ========= CONTEXT =========
-def build_context(s):
+# ========= SYSTEM CONTEXT (HIDDEN) =========
+def build_system(s):
     st = s["story"]
     return f"""
-SETTING: {st['setting']}
-WAKTU: {st['time']}
-TOKOH UTAMA: {s['name']}
-DESKRIPSI UTAMA: {st['main_desc']}
-PLOT: {st['plot']}
-HUBUNGAN: {st['relationships']}
-GAYA: {st['rules']}
+Kamu adalah penulis cerita romcom natural.
+
+ATURAN KERAS:
+- Jangan tampilkan setting, waktu, atau konteks ini
+- Jangan menulis ulang instruksi
+- Jangan menambahkan elemen baru di luar aksi user
+- Jangan mengubah waktu (tetap {st['time']})
+- Fokus pada aksi karakter, bukan menjelaskan ulang
+- Gunakan dialog natural, ringan, tidak kaku
+- Maksimal 2 paragraf
+
+KONTEKS:
+Setting: {st['setting']}
+Waktu: {st['time']}
+Tokoh utama: {s['name']}
+Deskripsi: {st['main_desc']}
+Plot: {st['plot']}
+Hubungan: {st['relationships']}
+Gaya: {st['rules']}
 """
 
 # ========= AI =========
-async def generate(prompt, uid):
+async def generate(prompt, uid, system):
     for m in MODELS:
         try:
             model = genai.GenerativeModel(m)
             loop = asyncio.get_event_loop()
-            res = await loop.run_in_executor(None, lambda: model.generate_content(prompt))
+
+            res = await loop.run_in_executor(
+                None,
+                lambda: model.generate_content(system + "\n\n" + prompt)
+            )
+
             return res.text.strip()
+
         except Exception as e:
             print("MODEL ERROR:", m, e)
             continue
@@ -149,82 +167,61 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ===== EDIT STORY =====
-    if step == "edit_setting":
-        s["story"]["setting"] = text
-    elif step == "edit_time":
-        s["story"]["time"] = text
-    elif step == "edit_desc":
-        s["story"]["main_desc"] = text
-    elif step == "edit_plot":
-        s["story"]["plot"] = text
-    elif step == "edit_rel":
-        s["story"]["relationships"] = text
-    else:
-        # ===== GENERATE =====
-        ctx = build_context(s)
+    if step and step.startswith("edit_"):
+        key = step.replace("edit_", "")
+        s["story"][key] = text
+        await save(uid, {"story": s["story"], "step": None})
+        await update.message.reply_text("Story diperbarui!", reply_markup=await menu(uid))
+        return
 
-        if step == "main_action":
-            prompt = f"""
-{ctx}
+    # ===== GENERATE =====
+    system = build_system(s)
 
+    if step == "main_action":
+        prompt = f"""
 Fokus: {s['name']}
 
 Aksi:
 {text}
 
-Jangan ubah waktu: {s['story']['time']}
-2 paragraf dialog natural
+{s['name']} adalah pusat aksi
+Karakter lain hanya merespon
 """
 
-        elif step == "char_action":
-            c = s["chars"][s["selected"]]
-            prompt = f"""
-{ctx}
-
+    elif step == "char_action":
+        c = s["chars"][s["selected"]]
+        prompt = f"""
 Fokus: {c['name']}
 
 Aksi:
 {text}
 
-{c['name']} pusat aksi
-{c['name']} yang bergerak duluan
-{s['name']} hanya merespon
-
-Jangan ubah waktu: {s['story']['time']}
-2 paragraf dialog natural
+{c['name']} yang memulai aksi
+{s['name']} hanya bereaksi
 """
 
-        elif step == "narator":
-            prompt = f"""
-{ctx}
-
-Ubah jadi adegan:
+    elif step == "narator":
+        prompt = f"""
+Ubah menjadi adegan dari:
 {text}
-
-2 paragraf dialog natural
 """
 
-        else:
-            return
-
-        # simpan prompt
-        await save(uid, {"last_prompt": prompt})
-
-        out = await generate(prompt, uid)
-
-        if not out:
-            await update.message.reply_text("AI error.")
-            return
-
-        hist = s["history"]
-        hist.append(out)
-
-        await save(uid, {"history": hist, "step": None})
-        await update.message.reply_text(out, reply_markup=await menu(uid))
+    else:
         return
 
-    await save(uid, {"story": s["story"], "step": None})
-    await update.message.reply_text("Story diperbarui!", reply_markup=await menu(uid))
+    await save(uid, {"last_prompt": prompt})
+
+    out = await generate(prompt, uid, system)
+
+    if not out:
+        await update.message.reply_text("AI error.")
+        return
+
+    hist = s["history"]
+    hist.append(out)
+
+    await save(uid, {"history": hist, "step": None})
+    await update.message.reply_text(out, reply_markup=await menu(uid))
 
 # ========= BUTTON =========
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -252,11 +249,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text("Belum ada cerita.")
             return
 
-        ctx = build_context(s)
-        prompt = f"{ctx}\nLanjutkan:\n{s['history'][-1]}"
+        system = build_system(s)
+        prompt = f"Lanjutkan cerita:\n{s['history'][-1]}"
         await save(uid, {"last_prompt": prompt})
 
-        out = await generate(prompt, uid)
+        out = await generate(prompt, uid, system)
 
         if out:
             hist = s["history"]
@@ -265,6 +262,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text(out, reply_markup=await menu(uid))
 
     elif data == "regen":
+        system = build_system(s)
         prompt = s.get("last_prompt")
 
         if not prompt:
@@ -273,7 +271,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         prompt = prompt + "\nTulis ulang dengan variasi berbeda."
 
-        out = await generate(prompt, uid)
+        out = await generate(prompt, uid, system)
 
         if not out:
             await q.message.reply_text("AI error.")
@@ -282,22 +280,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hist = s["history"]
 
         if hist:
-            hist[-1] = out  # replace hasil terakhir
+            hist[-1] = out
         else:
             hist.append(out)
 
         await save(uid, {"history": hist})
-
         await q.message.reply_text(out, reply_markup=await menu(uid))
-
-    elif data == "add_char":
-        await save(uid, {"step": "char_name"})
-        await q.message.reply_text("Nama karakter:")
-
-    elif data.startswith("char_"):
-        idx = int(data.split("_")[1])
-        await save(uid, {"step": "char_action", "selected": idx})
-        await q.message.reply_text(f"{s['chars'][idx]['name']} bereaksi bagaimana?")
 
     elif data == "undo":
         hist = s["history"]
@@ -308,15 +296,24 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await q.message.reply_text("Tidak bisa undo.")
 
+    elif data == "add_char":
+        await save(uid, {"step": "char_name"})
+        await q.message.reply_text("Nama karakter:")
+
+    elif data.startswith("char_"):
+        idx = int(data.split("_")[1])
+        await save(uid, {"step": "char_action", "selected": idx})
+        await q.message.reply_text(f"{s['chars'][idx]['name']} bereaksi bagaimana?")
+
     elif data == "edit_story":
         kb = [
             [InlineKeyboardButton("Setting", callback_data="edit_setting")],
             [InlineKeyboardButton("Waktu", callback_data="edit_time")],
-            [InlineKeyboardButton("Deskripsi Utama", callback_data="edit_desc")],
+            [InlineKeyboardButton("Deskripsi", callback_data="edit_main_desc")],
             [InlineKeyboardButton("Plot", callback_data="edit_plot")],
-            [InlineKeyboardButton("Hubungan", callback_data="edit_rel")]
+            [InlineKeyboardButton("Hubungan", callback_data="edit_relationships")]
         ]
-        await q.message.reply_text("Edit bagian mana?", reply_markup=InlineKeyboardMarkup(kb))
+        await q.message.reply_text("Edit bagian:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif data.startswith("edit_"):
         await save(uid, {"step": data})
