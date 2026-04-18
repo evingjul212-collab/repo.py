@@ -1,5 +1,6 @@
 import os
 import warnings
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -16,15 +17,14 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-gemini_main = genai.GenerativeModel("gemini-2.5-flash")
-gemini_lite = genai.GenerativeModel("gemini-3-flash")
+gemini_main = genai.GenerativeModel("gemini-1.5-flash")
+gemini_lite = genai.GenerativeModel("gemini-1.5-flash-8b")
 
-# OpenRouter fallback (Qwen)
+# Qwen (fallback)
 client_ai = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1"
 )
-
 QWEN_MODEL = "qwen/qwen2.5-7b-instruct"
 
 # Mongo
@@ -67,18 +67,16 @@ Kamu penulis romcom realistis.
 WAJIB:
 - Bahasa Indonesia natural
 - Maksimal 2 paragraf
-- Minimal 60% dialog
-- Jangan langsung konflik ekstrem
+- Fokus dialog
 - Jangan absurd
-- Reaksi manusiawi
-- Mulai dari narasi jika scene baru
+- Reaksi manusia normal
 """
 
 def prompt_narator(memory, text):
-    return f"{memory}\n\nBuat adegan dari input ini:\n{text}"
+    return f"{memory}\n\nBuat adegan dari input ini (mulai dari narasi dulu):\n{text}"
 
 def prompt_lanjut(memory, hist):
-    return f"{memory}\n\nLanjutkan cerita:\n{hist}"
+    return f"{memory}\n\nLanjutkan cerita ini:\n{hist}"
 
 def prompt_interaksi(memory, hist, char_name, text):
     return f"{memory}\n\nKonteks:\n{hist}\n\nTampilkan reaksi {char_name} terhadap:\n{text}"
@@ -86,9 +84,9 @@ def prompt_interaksi(memory, hist, char_name, text):
 # ================= VALIDASI =================
 
 def validate(text):
-    if not text or len(text.split()) < 20:
+    if not text:
         return False
-    if any(w in text.lower() for w in [" i ", " you ", " the "]):
+    if len(text.split()) < 10:
         return False
     return True
 
@@ -96,9 +94,16 @@ def validate(text):
 
 async def generate_gemini(prompt, model):
     try:
-        res = model.generate_content(SYSTEM_PROMPT + "\n" + prompt)
-        return res.text if res.text else None
-    except:
+        loop = asyncio.get_event_loop()
+        res = await loop.run_in_executor(
+            None,
+            lambda: model.generate_content(SYSTEM_PROMPT + "\n" + prompt)
+        )
+        if not res or not hasattr(res, "text"):
+            return None
+        return res.text.strip()
+    except Exception as e:
+        print("Gemini error:", e)
         return None
 
 async def generate_qwen(prompt):
@@ -113,24 +118,29 @@ async def generate_qwen(prompt):
             max_tokens=700
         )
         return res.choices[0].message.content.strip()
-    except:
+    except Exception as e:
+        print("Qwen error:", e)
         return None
 
 async def smart_generate(prompt):
-    # 1. Gemini utama
+    # Gemini main
     out = await generate_gemini(prompt, gemini_main)
     if validate(out):
-        return out, "gemini-main"
+        return out, "gemini"
 
-    # 2. Gemini lite
+    # Gemini lite
     out = await generate_gemini(prompt, gemini_lite)
     if validate(out):
         return out, "gemini-lite"
 
-    # 3. Qwen fallback
+    # Qwen fallback
     out = await generate_qwen(prompt)
     if validate(out):
         return out, "qwen"
+
+    # fallback raw
+    if out:
+        return out, "fallback"
 
     return None, None
 
@@ -139,7 +149,14 @@ async def smart_generate(prompt):
 async def get_menu(uid):
     state = ensure_memory(await users.find_one({"_id": uid}) or {})
 
-    keyboard = [
+    keyboard = []
+
+    if state.get("name"):
+        keyboard.append([
+            InlineKeyboardButton(f"👤 {state['name']}", callback_data="noop")
+        ])
+
+    keyboard += [
         [InlineKeyboardButton("📖 Narator", callback_data="narator"),
          InlineKeyboardButton("➡️ Lanjut", callback_data="lanjut")],
         [InlineKeyboardButton("➕ Karakter", callback_data="tambah"),
@@ -162,7 +179,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"$set": {"step": "input_name"}},
         upsert=True
     )
-    await update.message.reply_text("Nama tokoh utama?")
+    await update.message.reply_text("Masukkan nama tokoh utama:")
 
 # ================= MESSAGE =================
 
@@ -188,7 +205,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "$push": {"chars": {"name": state["temp_char"], "desc": text}},
             "$set": {"step": None}
         })
-        await update.message.reply_text("Karakter ditambah!", reply_markup=await get_menu(uid))
+        await update.message.reply_text("Karakter ditambahkan!", reply_markup=await get_menu(uid))
         return
 
     memory = build_memory(state)
@@ -196,11 +213,9 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if step == "narator":
         prompt = prompt_narator(memory, text)
-
     elif step == "char_react":
         char = state["chars"][state["selected_char"]]
         prompt = prompt_interaksi(memory, hist, char["name"], text)
-
     else:
         return
 
@@ -231,7 +246,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "narator":
         await users.update_one({"_id": uid}, {"$set": {"step": "narator"}})
-        await q.message.reply_text("Masukkan cerita:")
+        await q.message.reply_text("Masukkan alur cerita:")
 
     elif data == "lanjut":
         state = ensure_memory(await users.find_one({"_id": uid}) or {})
@@ -262,7 +277,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         history = state.get("history", [])
 
         if len(history) > 1:
-            history.pop()
+            history = history[:-1]
             await users.update_one({"_id": uid}, {"$set": {"history": history}})
             await q.message.reply_text(history[-1], reply_markup=await get_menu(uid))
         else:
@@ -270,7 +285,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "reset":
         await users.delete_one({"_id": uid})
-        await q.message.reply_text("Reset. /start lagi")
+        await q.message.reply_text("Data direset. /start lagi")
 
 # ================= RUN =================
 
