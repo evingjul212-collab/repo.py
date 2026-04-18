@@ -9,11 +9,11 @@ import google.generativeai as genai
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Menggunakan model versi 2.5 dan 3 sesuai permintaan
+# Prioritas Model 3 dan 2.5 untuk kecerdasan logika terbaik
 MODELS = [
     "gemini-3-flash",
     "gemini-2.5-flash",
-    "gemini-1.5-flash" # Sebagai fallback terakhir
+    "gemini-1.5-flash"
 ]
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
@@ -22,8 +22,7 @@ users = db.user_states
 
 # ========= STATE =========
 def fix_state(s):
-    if not s:
-        s = {}
+    if not s: s = {}
     return {
         "_id": s.get("_id"),
         "name": s.get("name"),
@@ -36,10 +35,7 @@ def fix_state(s):
         "story": s.get("story", {
             "setting": "Rumah",
             "time": "Sore",
-            "main_desc": "",
-            "plot": "",
-            "relationships": "",
-            "rules": "Romcom natural"
+            "rules": "Romcom natural, realistis"
         })
     }
 
@@ -52,64 +48,71 @@ async def get_state(uid):
 async def save(uid, data):
     await users.update_one({"_id": uid}, {"$set": data}, upsert=True)
 
-# ========= SYSTEM (RPG LOGIC) =========
+# ========= SYSTEM ENGINE =========
 def build_system(s):
     st = s["story"]
     char_list = ", ".join([c['name'] for c in s['chars']])
     
     return f"""
-Kamu adalah engine RPG Romcom interaktif. 
-Setting: {st['setting']} | Waktu: {st['time']} | Rules: {st['rules']}
-Daftar Karakter: {s['name']} (User), {char_list}
+KONTROL ENGINE RPG:
+- Setting Utama: {st['setting']} | Waktu: {st['time']}
+- Daftar Karakter Aktif: {s['name']} (User), {char_list}
 
-TUGAS UTAMA:
-- Fokus HANYA pada satu karakter yang ditentukan di prompt.
-- Hasilkan narasi aksi dan dialog HANYA untuk karakter tersebut.
-- DILARANG Keras menulis dialog, pikiran, atau aksi untuk karakter lain.
-- Gunakan sudut pandang orang ketiga (Third Person POV).
-- Output: 1 paragraf pendek, padat, fokus pada interaksi saat ini.
+PROTOKOL KONSISTENSI (WAJIB):
+1. LOGIKA FISIK: Perhatikan posisi karakter di pesan terakhir (duduk, berdiri, lokasi). Jangan mengubah posisi tanpa aksi yang masuk akal.
+2. POV TERKUNCI: Hasilkan narasi & dialog HANYA untuk karakter yang diminta.
+3. ANTI-AMNESIA: Gunakan konteks sebelumnya untuk menjaga alur. Jika karakter sedang di kamar mandi, jangan tiba-tiba di dapur.
+4. GAYA BAHASA: Romcom natural, deskripsi hidup, 1-2 paragraf saja.
+5. DILARANG keras mengontrol atau menulis dialog karakter lain.
 """
 
-# ========= AI =========
+# ========= AI GENERATOR =========
 async def generate(prompt, system, history):
-    # Mengambil sedikit konteks sejarah agar nyambung
-    context = "\n".join(history[-3:]) if history else ""
-    full_input = f"{system}\n\nKonteks sebelumnya:\n{context}\n\nInstruksi sekarang:\n{prompt}"
+    # Mengambil hingga 12 pesan terakhir untuk stabilitas memori jangka panjang
+    context = "\n---\n".join(history[-12:]) if history else "Cerita dimulai."
+    
+    full_input = f"""
+{system}
+
+--- MEMORI ALUR TERAKHIR ---
+{context}
+
+--- INSTRUKSI PERAN SEKARANG ---
+{prompt}
+
+Tanggapi dengan menjaga kesinambungan posisi fisik dan situasi dari memori di atas:
+"""
     
     for m in MODELS:
         try:
             model = genai.GenerativeModel(m)
             loop = asyncio.get_event_loop()
             res = await loop.run_in_executor(
-                None,
+                None, 
                 lambda: model.generate_content(full_input)
             )
-            return res.text.strip()
+            return res.text.strip().replace("```", "")
         except Exception as e:
-            print(f"MODEL ERROR {m}:", e)
+            print(f"DEBUG: {m} bermasalah, mencoba model lain... Error: {e}")
             continue
     return None
 
-# ========= MENU =========
+# ========= INTERFACE =========
 async def menu(uid):
     s = await get_state(uid)
     kb = []
-
     if s["name"]:
-        kb.append([InlineKeyboardButton(f"👤 {s['name']} (UTAMA)", callback_data="main")])
+        kb.append([InlineKeyboardButton(f"👤 POV: {s['name']}", callback_data="main")])
 
     kb.append([
-        InlineKeyboardButton("📖 Narator", callback_data="narator"),
-        InlineKeyboardButton("➡️ Lanjut", callback_data="lanjut")
-    ])
-
-    kb.append([
-        InlineKeyboardButton("➕ Tambah Karakter", callback_data="add_char")
+        InlineKeyboardButton("🎭 Narator", callback_data="narator"),
+        InlineKeyboardButton("⏩ Lanjut", callback_data="lanjut")
     ])
 
     for i, c in enumerate(s["chars"]):
-        kb.append([InlineKeyboardButton(f"💬 {c['name']}", callback_data=f"char_{i}")])
+        kb.append([InlineKeyboardButton(f"💬 POV: {c['name']}", callback_data=f"char_{i}")])
 
+    kb.append([InlineKeyboardButton("➕ Karakter Baru", callback_data="add_char")])
     kb.append([
         InlineKeyboardButton("↩️ Undo", callback_data="undo"),
         InlineKeyboardButton("🔄 Regen", callback_data="regen")
@@ -117,120 +120,88 @@ async def menu(uid):
 
     return InlineKeyboardMarkup(kb)
 
-# ========= START =========
+# ========= HANDLERS =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await save(update.effective_user.id, {
-        "name": None,
-        "step": "set_name",
-        "history": [],
-        "chars": []
-    })
-    await update.message.reply_text("Selamat datang di RPG Romcom!\nMasukkan nama Tokoh Utama kamu:")
+    await save(update.effective_user.id, {"name": None, "step": "set_name", "history": [], "chars": []})
+    await update.message.reply_text("🎮 RPG Engine Ready.\nMasukkan nama Tokoh Utama:")
 
-# ========= MESSAGE =========
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
     s = await get_state(uid)
-    step = s["step"]
-
-    if step == "set_name":
+    
+    if s["step"] == "set_name":
         await save(uid, {"name": text, "step": None})
-        await update.message.reply_text(f"Halo {text}! Siap memulai cerita?", reply_markup=await menu(uid))
+        await update.message.reply_text(f"Karakter utama '{text}' terdaftar.", reply_markup=await menu(uid))
         return
 
-    if step == "char_name":
+    if s["step"] == "char_name":
         await save(uid, {"temp_char": text, "step": "char_desc"})
-        await update.message.reply_text(f"Apa deskripsi/sifat untuk {text}?")
+        await update.message.reply_text(f"Deskripsi singkat untuk {text}?")
         return
 
-    if step == "char_desc":
+    if s["step"] == "char_desc":
         chars = s["chars"]
         chars.append({"name": s["temp_char"], "desc": text})
         await save(uid, {"chars": chars, "step": None})
-        await update.message.reply_text(f"Karakter {s['temp_char']} berhasil masuk ke dalam cerita!", reply_markup=await menu(uid))
+        await update.message.reply_text(f"{s['temp_char']} masuk ke dunia.", reply_markup=await menu(uid))
         return
 
-    system = build_system(s)
-
-    # PEMISAHAN LOGIKA SUDUT PANDANG (POV)
-    if step == "main_action":
-        prompt = f"Tulis narasi & dialog untuk {s['name']} saja. Dia sedang: {text}. Jangan tulis respon karakter lain."
-    
-    elif step == "char_action":
+    # PROMPT LOGIC
+    if s["step"] == "main_action":
+        prompt = f"POV {s['name']}: Lakukan aksi ini -> {text}. Fokus pada respon {s['name']} saja."
+    elif s["step"] == "char_action":
         c = s["chars"][s["selected"]]
-        prompt = f"Tulis narasi & dialog untuk {c['name']} saja sebagai respon. User ({s['name']}) sedang: {text}. Jangan tulis dialog {s['name']}."
-
-    elif step == "narator":
-        prompt = f"Tulis narasi lingkungan atau transisi tanpa dialog: {text}"
-    else:
-        return
+        prompt = f"POV {c['name']}: Berikan reaksi terhadap {s['name']}. Aksi spesifik: {text}. Fokus pada {c['name']} saja."
+    elif s["step"] == "narator":
+        prompt = f"NARASI: Deskripsikan perubahan situasi atau lingkungan: {text}. Tanpa dialog."
+    else: return
 
     await save(uid, {"last_prompt": prompt})
-    out = await generate(prompt, system, s["history"])
+    out = await generate(prompt, build_system(s), s["history"])
 
-    if not out:
-        await update.message.reply_text("AI sedang lelah, coba lagi, Bos.")
-        return
+    if out:
+        hist = s["history"]
+        hist.append(out)
+        await save(uid, {"history": hist, "step": None})
+        await update.message.reply_text(out, reply_markup=await menu(uid))
 
-    hist = s["history"]
-    hist.append(out)
-    await save(uid, {"history": hist, "step": None})
-    await update.message.reply_text(out, reply_markup=await menu(uid))
-
-# ========= BUTTON =========
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
-    data = q.data
+    s = await get_state(uid)
     try: await q.answer()
     except: pass
 
-    s = await get_state(uid)
-
-    if data == "main":
+    if q.data == "main":
         await save(uid, {"step": "main_action"})
-        await q.message.reply_text(f"Apa yang dilakukan {s['name']}?")
-
-    elif data.startswith("char_"):
-        idx = int(data.split("_")[1])
+        await q.message.reply_text(f"Tindakan apa yang diambil {s['name']}?")
+    elif q.data.startswith("char_"):
+        idx = int(q.data.split("_")[1])
         await save(uid, {"step": "char_action", "selected": idx})
-        await q.message.reply_text(f"Apa yang dilakukan {s['chars'][idx]['name']}?")
-
-    elif data == "add_char":
+        await q.message.reply_text(f"Apa reaksi dari {s['chars'][idx]['name']}?")
+    elif q.data == "add_char":
         await save(uid, {"step": "char_name"})
-        await q.message.reply_text("Nama karakter baru:")
-
-    elif data == "narator":
+        await q.message.reply_text("Siapa nama karakternya?")
+    elif q.data == "narator":
         await save(uid, {"step": "narator"})
-        await q.message.reply_text("Apa yang terjadi secara naratif?")
-
-    elif data == "lanjut":
-        system = build_system(s)
-        prompt = "Lanjutkan narasi secara natural tanpa dialog baru, fokus pada suasana."
-        out = await generate(prompt, system, s["history"])
+        await q.message.reply_text("Tuliskan peristiwa lingkungan:")
+    elif q.data == "lanjut":
+        out = await generate("Lanjutkan alur cerita secara natural sesuai posisi terakhir.", build_system(s), s["history"])
         if out:
-            hist = s["history"]
-            hist.append(out)
-            await save(uid, {"history": hist})
+            s["history"].append(out)
+            await save(uid, {"history": s["history"]})
             await q.message.reply_text(out, reply_markup=await menu(uid))
-
-    elif data == "undo":
-        hist = s["history"]
-        if len(hist) > 1:
-            hist.pop()
-            await save(uid, {"history": hist})
-            await q.message.reply_text("--- Langkah Terakhir Dibatalkan ---\n\n" + hist[-1], reply_markup=await menu(uid))
-
-    elif data == "regen":
-        prompt = s.get("last_prompt")
-        if not prompt: return
-        system = build_system(s)
-        out = await generate(prompt + " (Variasikan sedikit)", system, s["history"][:-1])
+    elif q.data == "undo":
+        if len(s["history"]) > 1:
+            s["history"].pop()
+            await save(uid, {"history": s["history"]})
+            await q.message.reply_text("--- Langkah Dibatalkan ---\n\n" + s["history"][-1], reply_markup=await menu(uid))
+    elif q.data == "regen":
+        out = await generate(s.get("last_prompt") + " (Berikan variasi narasi berbeda)", build_system(s), s["history"][:-1])
         if out:
-            hist = s["history"]
-            hist[-1] = out
-            await save(uid, {"history": hist})
+            s["history"][-1] = out
+            await save(uid, {"history": s["history"]})
             await q.message.reply_text(out, reply_markup=await menu(uid))
 
 # ========= RUN =========
@@ -239,5 +210,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
-    print("RPG BOT READY (MODELS: 3 & 2.5)...")
+    print("RPG ENGINE DEPLOYED. WAITING FOR ACTIONS...")
     app.run_polling(drop_pending_updates=True)
