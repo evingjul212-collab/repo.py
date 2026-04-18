@@ -1,48 +1,35 @@
 import os
-import warnings
 import asyncio
+import warnings
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, Defaults
 )
-import google.generativeai as genai
 from motor.motor_asyncio import AsyncIOMotorClient
-from google.api_core.exceptions import ResourceExhausted
+from openai import OpenAI
 
-warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore")
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-3-flash')
+
+client_ai = OpenAI(
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url="https://openrouter.ai/api/v1"
+)
+
+MODELS = {
+    "qwen": "qwen/qwen2.5-7b-instruct",
+    "qwen_big": "qwen/qwen2.5-14b-instruct",
+    "llama": "meta-llama/llama-3-8b-instruct"
+}
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
 users = db.user_states
 
 # ================= UTIL =================
-
-def safe_text(res):
-    try:
-        return res.text if res.text else "⚠️ AI kosong."
-    except:
-        return "⚠️ Error AI."
-
-def trim(text, limit=2000):
-    return text[:limit]
-
-async def generate_ai(prompt):
-    try:
-        await asyncio.sleep(1)
-        res = model.generate_content(prompt)
-        return trim(safe_text(res))
-    except ResourceExhausted:
-        return "⚠️ Limit AI tercapai."
-    except Exception as e:
-        return f"⚠️ Error: {str(e)}"
-
-# ================= MEMORY =================
 
 def ensure_memory(state):
     defaults = {
@@ -51,7 +38,8 @@ def ensure_memory(state):
         "scene": "awal cerita",
         "outfit": "pakaian santai",
         "history": ["Cerita dimulai."],
-        "chars": []
+        "chars": [],
+        "model": "qwen"
     }
     for k, v in defaults.items():
         if k not in state:
@@ -66,39 +54,21 @@ def build_memory(state):
         f"Outfit: {state['outfit']}\n"
     )
 
-def update_memory_fields(state, text):
-    t = text.lower()
-
-    if "malam" in t: state["time"] = "malam"
-    elif "sore" in t: state["time"] = "sore"
-    elif "siang" in t: state["time"] = "siang"
-
-    if "sekolah" in t: state["location"] = "sekolah"
-    elif "pantai" in t: state["location"] = "pantai"
-
-    if "ganti baju" in t:
-        state["outfit"] = "pakaian baru"
-
-    return state
-
 def get_context(state):
-    history = state.get("history", [])
-    return "\n".join(history[-3:])
-
-# ================= PROMPT =================
+    return "\n".join(state.get("history", [])[-3:])
 
 def build_prompt(memory, hist, action):
     return f"""
 {memory}
 
-LANJUTKAN CERITA.
+LANJUTKAN CERITA ROMCOM.
 
 RULE:
 - Maksimal 2 paragraf
-- Fokus dialog (minimal 60%)
-- Gunakan tanda kutip untuk dialog
+- Minimal 60% dialog
+- Gunakan tanda kutip
 - Jangan ubah waktu/lokasi/outfit
-- Jangan loncat waktu
+- Lanjutkan natural
 
 KONTEKS:
 {hist}
@@ -107,12 +77,48 @@ AKSI:
 {action}
 """
 
+# ================= AI =================
+
+async def generate_ai(prompt, state):
+    model_key = state.get("model", "qwen")
+
+    try:
+        res = client_ai.chat.completions.create(
+            model=MODELS[model_key],
+            messages=[
+                {"role": "system", "content": "Penulis romcom dialog natural."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=700,
+            temperature=0.9
+        )
+        return res.choices[0].message.content.strip(), None
+
+    except Exception:
+        fallback = "llama" if model_key != "llama" else "qwen"
+
+        try:
+            res = client_ai.chat.completions.create(
+                model=MODELS[fallback],
+                messages=[
+                    {"role": "system", "content": "Penulis romcom dialog natural."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=700,
+                temperature=0.9
+            )
+            return res.choices[0].message.content.strip(), f"⚠️ Model diganti ke {fallback}"
+
+        except Exception:
+            return None, "❌ Semua model error"
+
 # ================= MENU =================
 
 async def get_menu(uid):
     state = ensure_memory(await users.find_one({"_id": uid}) or {})
 
     keyboard = [
+        [InlineKeyboardButton(f"🧠 Model: {state['model']}", callback_data="ganti_model")],
         [InlineKeyboardButton("📖 Narator", callback_data='narator'),
          InlineKeyboardButton("➡️ Lanjut", callback_data='lanjut')],
         [InlineKeyboardButton("➕ Karakter", callback_data='tambah_karakter'),
@@ -121,7 +127,7 @@ async def get_menu(uid):
     ]
 
     if state.get("name"):
-        keyboard.insert(0, [
+        keyboard.insert(1, [
             InlineKeyboardButton(f"👤 {state['name']}", callback_data='aksi_user')
         ])
 
@@ -135,8 +141,11 @@ async def get_menu(uid):
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await users.update_one({"_id": update.effective_user.id},
-                           {"$set": {"step": "input_name"}}, upsert=True)
+    await users.update_one(
+        {"_id": update.effective_user.id},
+        {"$set": {"step": "input_name"}},
+        upsert=True
+    )
     await update.message.reply_text("Masukkan nama tokoh:")
 
 # ================= MESSAGE =================
@@ -151,8 +160,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == "input_name":
         await users.update_one({"_id": uid}, {"$set": {
             "name": text,
-            "step": None,
-            "history": ["Cerita dimulai."]
+            "step": None
         }})
         await update.message.reply_text("Nama disimpan!", reply_markup=await get_menu(uid))
         return
@@ -172,20 +180,22 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if step in ["input_aksi_user", "input_narator", "input_char_action"]:
-        state = update_memory_fields(state, text)
-
         memory = build_memory(state)
         hist = get_context(state)
 
         if step == "input_char_action":
-            idx = state.get("selected_char")
-            char = state["chars"][idx]
+            char = state["chars"][state["selected_char"]]
             action = f"{state['name']} ke {char['name']}: {text}"
         else:
             action = text
 
         prompt = build_prompt(memory, hist, action)
-        out = await generate_ai(prompt)
+        out, err = await generate_ai(prompt, state)
+
+        if not out:
+            keyboard = [[InlineKeyboardButton("🔄 Ganti Model", callback_data="ganti_model")]]
+            await update.message.reply_text(err, reply_markup=InlineKeyboardMarkup(keyboard))
+            return
 
         history = state.get("history", [])
         history.append(out)
@@ -193,14 +203,12 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await users.update_one({"_id": uid}, {"$set": {
             "history": history,
             "step": None,
-            "selected_char": None,
-            "time": state["time"],
-            "location": state["location"],
-            "scene": state["scene"],
-            "outfit": state["outfit"]
+            "selected_char": None
         }})
 
-        await update.message.reply_text(out, reply_markup=await get_menu(uid))
+        msg_text = (err + "\n\n" if err else "") + out
+
+        await update.message.reply_text(msg_text, reply_markup=await get_menu(uid))
 
 # ================= BUTTON =================
 
@@ -212,49 +220,56 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = ensure_memory(await users.find_one({"_id": uid}) or {})
 
-    if data == "narator":
+    if data == "ganti_model":
+        keyboard = [
+            [InlineKeyboardButton("Qwen Cepat", callback_data="set_qwen")],
+            [InlineKeyboardButton("Qwen Pintar", callback_data="set_qwen_big")],
+            [InlineKeyboardButton("Llama", callback_data="set_llama")]
+        ]
+        await query.message.reply_text("Pilih model:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data.startswith("set_"):
+        model = data.replace("set_", "")
+        await users.update_one({"_id": uid}, {"$set": {"model": model}})
+        await query.message.reply_text(f"✅ Model: {model}")
+
+    elif data == "narator":
         await users.update_one({"_id": uid}, {"$set": {"step": "input_narator"}})
         await query.message.reply_text("Input cerita:")
 
     elif data == "aksi_user":
         await users.update_one({"_id": uid}, {"$set": {"step": "input_aksi_user"}})
-        await query.message.reply_text("Aksi tokoh:")
+        await query.message.reply_text("Aksi:")
 
     elif data.startswith("c_"):
         idx = int(data.split("_")[1])
-        await users.update_one({"_id": uid}, {"$set": {
-            "step": "input_char_action",
-            "selected_char": idx
-        }})
+        await users.update_one({"_id": uid}, {"$set": {"step": "input_char_action", "selected_char": idx}})
         await query.message.reply_text("Aksi ke karakter:")
 
     elif data == "lanjut":
         memory = build_memory(state)
         hist = get_context(state)
 
-        prompt = build_prompt(memory, hist, "lanjutkan")
+        out, err = await generate_ai(build_prompt(memory, hist, "lanjutkan"), state)
 
-        out = await generate_ai(prompt)
+        if not out:
+            keyboard = [[InlineKeyboardButton("🔄 Ganti Model", callback_data="ganti_model")]]
+            await query.message.reply_text(err, reply_markup=InlineKeyboardMarkup(keyboard))
+            return
 
         history = state.get("history", [])
         history.append(out)
 
         await users.update_one({"_id": uid}, {"$set": {"history": history}})
 
-        await query.message.reply_text(out, reply_markup=await get_menu(uid))
+        await query.message.reply_text((err + "\n\n" if err else "") + out, reply_markup=await get_menu(uid))
 
     elif data == "undo":
         history = state.get("history", [])
-
         if len(history) > 1:
             history = history[:-1]
-
             await users.update_one({"_id": uid}, {"$set": {"history": history}})
-
-            await query.message.reply_text(
-                history[-1],
-                reply_markup=await get_menu(uid)
-            )
+            await query.message.reply_text(history[-1], reply_markup=await get_menu(uid))
         else:
             await query.message.reply_text("Tidak bisa undo.")
 
@@ -264,7 +279,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "reset":
         await users.delete_one({"_id": uid})
-        await query.message.reply_text("Reset selesai. /start lagi")
+        await query.message.reply_text("Reset. /start lagi")
 
 # ================= RUN =================
 
