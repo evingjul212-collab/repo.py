@@ -16,8 +16,8 @@ warnings.filterwarnings("ignore")
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-gemini_main = genai.GenerativeModel("gemini-1.5-flash")
-gemini_lite = genai.GenerativeModel("gemini-1.5-flash-8b")
+gemini_main = genai.GenerativeModel("gemini-2.5-flash")
+gemini_lite = genai.GenerativeModel("gemini-3-flash-preview")
 
 client_ai = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
