@@ -9,20 +9,20 @@ import google.generativeai as genai
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
+# MODEL PALING AMAN (NO DRAMA)
 MODELS = [
     "gemini-2.5-flash-lite",
-    "gemini-3-flash-preview"
+    "gemini-2.5-flash"
 ]
 
 client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client.game_db
 users = db.user_states
 
-# ========= AUTO FIX STATE =========
+# ========= STATE SAFE =========
 def fix_state(s):
     if not s:
         s = {}
-
     return {
         "_id": s.get("_id"),
         "name": s.get("name"),
@@ -66,7 +66,8 @@ async def generate(prompt, uid):
             await save(uid, {"model": m})
             return res.text.strip()
 
-        except:
+        except Exception as e:
+            print(f"MODEL ERROR {m}: {e}")
             continue
 
     return None
@@ -88,10 +89,6 @@ async def menu(uid):
     kb.append([
         InlineKeyboardButton("➕ Karakter", callback_data="add_char"),
         InlineKeyboardButton("↩️ Undo", callback_data="undo")
-    ])
-
-    kb.append([
-        InlineKeyboardButton("🧠 Model", callback_data="model")
     ])
 
     for i, c in enumerate(s["chars"]):
@@ -125,13 +122,11 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = await get_state(uid)
     step = s["step"]
 
-    # ===== SET NAME =====
     if step == "set_name":
         await save(uid, {"name": text, "step": None})
         await update.message.reply_text("Nama disimpan!", reply_markup=await menu(uid))
         return
 
-    # ===== TAMBAH KARAKTER =====
     if step == "char_name":
         await save(uid, {"temp_char": text, "step": "char_desc"})
         await update.message.reply_text("Deskripsi karakter:")
@@ -140,33 +135,48 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == "char_desc":
         chars = s["chars"]
         chars.append({"name": s["temp_char"], "desc": text})
-
-        await save(uid, {
-            "chars": chars,
-            "step": None,
-            "temp_char": None
-        })
-
+        await save(uid, {"chars": chars, "step": None, "temp_char": None})
         await update.message.reply_text("Karakter ditambahkan!", reply_markup=await menu(uid))
         return
 
-    # ===== TOKOH UTAMA =====
     if step == "main_action":
-        prompt = f"{s['name']} melakukan: {text}. Lanjutkan cerita romcom 2 paragraf dengan dialog."
+        prompt = f"""
+Lanjutkan adegan romcom.
+Aksi:
+{text}
 
-    # ===== NARATOR =====
+JANGAN jelaskan ulang.
+Langsung adegan.
+2 paragraf, banyak dialog.
+"""
+
     elif step == "narator":
-        prompt = f"Ubah jadi adegan cerita romcom 2 paragraf dengan dialog: {text}"
+        prompt = f"""
+Ubah ini jadi adegan romcom:
 
-    # ===== INTERAKSI =====
+{text}
+
+Langsung adegan.
+2 paragraf, dialog natural.
+"""
+
     elif step == "char_action":
         if s["selected"] is None or s["selected"] >= len(s["chars"]):
             await update.message.reply_text("Karakter error.")
             return
 
         c = s["chars"][s["selected"]]
-        prompt = f"Reaksi {c['name']} terhadap: {text}. Buat dialog interaktif 2 paragraf."
 
+        prompt = f"""
+Adegan antara {s['name']} dan {c['name']}.
+
+Aksi:
+{text}
+
+JANGAN jelaskan.
+Langsung dialog.
+2 paragraf.
+"""
     else:
         return
 
@@ -182,7 +192,6 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hist.append(out)
 
     await save(uid, {"history": hist, "step": None})
-
     await update.message.reply_text(out, reply_markup=await menu(uid))
 
 # ========= BUTTON =========
@@ -200,18 +209,18 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "main":
         await save(uid, {"step": "main_action"})
-        await q.message.reply_text("Aksi tokoh utama?")
+        await q.message.reply_text(f"{s['name']} melakukan apa?")
 
     elif data == "narator":
         await save(uid, {"step": "narator"})
-        await q.message.reply_text("Masukkan ide cerita:")
+        await q.message.reply_text("Ceritanya mau dibawa kemana?")
 
     elif data == "lanjut":
         if not s["history"]:
             await q.message.reply_text("Belum ada cerita.")
             return
 
-        prompt = f"Lanjutkan cerita ini dengan dialog: {s['history'][-1]}"
+        prompt = f"Lanjutkan adegan ini:\n{s['history'][-1]}"
         out = await generate(prompt, uid)
 
         if out:
@@ -224,7 +233,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "add_char":
         await save(uid, {"step": "char_name"})
-        await q.message.reply_text("Nama karakter?")
+        await q.message.reply_text("Nama karakter baru?")
 
     elif data.startswith("char_"):
         idx = int(data.split("_")[1])
@@ -233,8 +242,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text("Karakter tidak ada.")
             return
 
+        c = s["chars"][idx]
         await save(uid, {"step": "char_action", "selected": idx})
-        await q.message.reply_text("Aksi ke karakter ini?")
+        await q.message.reply_text(f"{c['name']} bereaksi bagaimana?")
 
     elif data == "undo":
         hist = s["history"]
@@ -262,27 +272,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text(out, reply_markup=await menu(uid))
         else:
             await q.message.reply_text("Masih error.")
-
-    # ===== MODEL =====
-    elif data == "model":
-        kb = [
-            [InlineKeyboardButton("Auto", callback_data="m_auto")],
-            [InlineKeyboardButton("Gemini 2.5", callback_data="m_25")],
-            [InlineKeyboardButton("Gemini 1.5", callback_data="m_15")]
-        ]
-        await q.message.reply_text("Pilih model:", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "m_auto":
-        await save(uid, {"force_model": None})
-        await q.message.reply_text("Model: Auto")
-
-    elif data == "m_25":
-        await save(uid, {"force_model": "gemini-2.5-flash-lite"})
-        await q.message.reply_text("Model: Gemini 2.5")
-
-    elif data == "m_15":
-        await save(uid, {"force_model": "gemini-3-flash-preview"})
-        await q.message.reply_text("Model: Gemini 3")
 
 # ========= RUN =========
 app = Application.builder().token(BOT_TOKEN).build()
