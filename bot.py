@@ -22,6 +22,7 @@ def fix_state(s):
         "_id": s.get("_id"),
         "name": s.get("name") or "User",
         "desc_utama": s.get("desc_utama") or "Tokoh Utama",
+        "kondisi": s.get("kondisi") or "Normal, berpakaian lengkap", # FITUR BARU
         "step": s.get("step"),
         "history": s.get("history", []),
         "chars": s.get("chars", []),
@@ -41,8 +42,8 @@ async def save(uid, data):
 
 # ========= AI ENGINE =========
 async def generate(prompt, system, history):
-    context = "\n---\n".join(history[-30:]) if history else "Start."
-    full_input = f"{system}\n\n[MEMORI]\n{context}\n\n[AKSI]\n{prompt}"
+    context = "\n---\n".join(history[-25:]) if history else "Mulai."
+    full_input = f"{system}\n\n[MEMORI CERITA]\n{context}\n\n[AKSI SEKARANG]\n{prompt}"
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
@@ -54,6 +55,7 @@ async def generate(prompt, system, history):
 # ========= HELPERS =========
 async def menu_utama(uid):
     kb = [
+        [InlineKeyboardButton("📍 Update Kondisi/Lokasi", callback_data="set_kondisi")], # TOMBOL BARU
         [InlineKeyboardButton("📜 Daftar Karakter", callback_data="list_all")],
         [InlineKeyboardButton("🎭 Narator", callback_data="step_narator"), InlineKeyboardButton("⏩ Lanjut Alur", callback_data="lanjut")],
         [InlineKeyboardButton("📖 Baca Riwayat", callback_data="export_logs")],
@@ -71,7 +73,7 @@ async def safe_send(update, text, tag, markup):
 # ========= HANDLERS =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await save(update.effective_user.id, {"name": None, "step": "set_name", "history": [], "chars": []})
-    await update.message.reply_text("🎮 RPG Engine V2.1\nNama Tokoh Utama?")
+    await update.message.reply_text("🎮 RPG Engine V2.2 [Status Guard]\nNama Tokoh Utama?")
 
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, text = update.effective_user.id, update.message.text
@@ -82,17 +84,20 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Halo {text}!", reply_markup=await menu_utama(uid))
         return
 
-    # FITUR BARU: Proses Import Massal
+    # PROSES UPDATE KONDISI PERMANEN
+    if s["step"] == "updating_kondisi":
+        await save(uid, {"kondisi": text, "step": None})
+        await update.message.reply_text(f"✅ Kondisi diperbarui: {text}", reply_markup=await menu_utama(uid))
+        return
+
     if s["step"] == "import_chars":
         lines = text.split("\n")
-        added = 0
         for line in lines:
             if ":" in line:
                 c_name, c_desc = line.split(":", 1)
                 s["chars"].append({"name": c_name.strip(), "desc": c_desc.strip()})
-                added += 1
         await save(uid, {"chars": s["chars"], "step": None})
-        await update.message.reply_text(f"✅ Berhasil mengimpor {added} karakter!", reply_markup=await menu_utama(uid))
+        await update.message.reply_text(f"✅ Berhasil impor!", reply_markup=await menu_utama(uid))
         return
 
     if s["step"] and s["step"].startswith("updating_"):
@@ -120,9 +125,13 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = s.get("selected", -1)
         tag = "NARASI" if is_nar else (s["name"] if idx == -1 else s["chars"][idx]["name"])
         desc = s["desc_utama"] if idx == -1 else s["chars"][idx].get("desc", "NPC")
-        system = f"Kamu RPG Engine. Perankan {tag} ({desc})."
+        
+        # INI KUNCI PERBAIKANNYA: Kondisi selalu dipaksa masuk ke System Prompt
+        system = f"Kamu RPG Engine. Perankan {tag} ({desc}).\nKONDISI SAAT INI: {s['kondisi']}.\nJangan mengubah kondisi busana atau lokasi kecuali ada aksi yang relevan."
+        
         prompt = f"POV {tag}: {text}" if not is_nar else f"KEJADIAN: {text}"
         await save(uid, {"last_prompt": prompt, "last_system": system})
+        
         out, model = await generate(prompt, system, s["history"])
         if out:
             s["history"].append(f"[{tag}]: {out}")
@@ -136,21 +145,25 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, s = q.from_user.id, await get_state(q.from_user.id)
     await q.answer()
 
-    if q.data == "list_all":
+    if q.data == "set_kondisi":
+        await save(uid, {"step": "updating_kondisi"})
+        await q.message.reply_text(f"📍 Kondisi saat ini: {s['kondisi']}\n\nKetik kondisi baru (Lokasi, Busana, Status):\nContoh: Di kamar mandi, hanya pakai handuk, suasana dingin.")
+
+    elif q.data == "list_all":
         kb = [[InlineKeyboardButton(f"👤 {s['name']} (Utama)", callback_data="sel_-1")]]
         for i, c in enumerate(s["chars"]): kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
-        kb.append([InlineKeyboardButton("➕ Tambah Satu", callback_data="add_new"), InlineKeyboardButton("📥 Import Massal", callback_data="import_menu")])
-        kb.append([InlineKeyboardButton("⬅️ Menu Utama", callback_data="main_menu")])
-        await q.edit_message_text("Daftar Karakter:", reply_markup=InlineKeyboardMarkup(kb))
+        kb.append([InlineKeyboardButton("➕ NPC", callback_data="add_new"), InlineKeyboardButton("📥 Import", callback_data="import_menu")])
+        kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
+        await q.edit_message_text("Manajemen Karakter:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data == "import_menu":
         await save(uid, {"step": "import_chars"})
-        await q.message.reply_text("Kirimkan daftar karakter dengan format:\n\nNama: Deskripsi\nNama: Deskripsi\n\nContoh:\nRiko: Pendekar pedang sakti\nBudi: Pedagang pasar yang licik")
+        await q.message.reply_text("Format: Nama: Deskripsi")
 
     elif q.data == "export_logs":
-        full_story = f"RIWAYAT: {s['name']}\n" + ("="*20) + "\n\n" + "\n\n".join(s["history"])
+        full_story = f"RIWAYAT: {s['name']}\n\n" + "\n\n".join(s["history"])
         file_data = io.BytesIO(full_story.encode()); file_data.name = f"Log_{s['name']}.txt"
-        await q.message.reply_document(document=file_data, caption="📜 Riwayat lengkap.")
+        await q.message.reply_document(document=file_data, caption="📜 Riwayat.")
 
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1])
@@ -202,5 +215,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
-    print("V2.1 Import Feature Ready...")
+    print("V2.2 Status Guard Deployed...")
     app.run_polling()
