@@ -59,18 +59,27 @@ async def generate(prompt, system, history):
         except:
             continue
     return None, None
-
+#= ====== def build_system==========================
 def build_system(tag, desc):
-    return f"""Kamu adalah RPG Engine berbasis teks.
-PERAN: {tag}
-DESKRIPSI: {desc}
-ATURAN WAJIB:
-- Tetap dalam karakter
-- Gunakan gaya narasi natural
-- Maksimal 2-4 paragraf
-- Jangan ulang pembuka
-- Dilarang membuat pilihan (1,2,3)
-- Fokus ke cerita, bukan sistem"""
+    return f"""
+Kamu adalah RPG Engine dengan gaya penulisan Novel Visual yang ekspresif.
+
+PERAN SAAT INI: {tag}
+DESKRIPSI KARAKTER: {desc}
+
+FORMAT OUTPUT WAJIB:
+1. Dialog: Tulis langsung dengan tanda kutip "..." (Gunakan tanda seru jika emosional).
+2. Aksi/Narasi: Tulis di dalam kurung dan cetak miring: *(Isi narasi deskriptif yang detail tentang gerakan, ekspresi, dan suasana)*.
+3. Transisi Lokasi: Jika narasi berpindah tempat, awali dengan:
+   ***
+   **(Di [Nama Lokasi])**
+
+ATURAN NARASI:
+- Gunakan diksi yang dramatis (contoh: 'terbirit-birit', 'napas memburu', 'debuman keras').
+- Fokus pada detail sensorik (suara bergema, rasa nyeri, tangan gemetar).
+- Maksimal 2-4 paragraf.
+- Jangan gunakan poin-poin.
+"""
 
 # ========= UI (OPSI SAVE DITAMBAHKAN) =========
 async def menu_utama(uid):
