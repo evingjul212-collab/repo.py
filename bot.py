@@ -168,8 +168,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_hist = data.get("history", [])
                 ref = data.get("referensi", "Belum ada referensi.")
                 
-                # --- FIX REGEN SETELAH LOAD ---
-                # Kita set agar Regen mengulang baris terakhir dari history yang baru dimuat
+                # --- FIX REGEN & LIMIT TAMPILAN ---
                 last_msg = new_hist[-1] if new_hist else "Mulai cerita."
                 tag_last = last_msg.split("]:")[0].replace("[", "") if "]:" in last_msg else "NARASI"
                 sys_last = build_system(tag_last, "Karakter", ref)
@@ -178,15 +177,18 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "history": new_hist,
                     "chars": data.get("chars", []),
                     "referensi": ref,
-                    "last_prompt": f"Lanjutkan aksi terakhir: {last_msg}",
+                    "last_prompt": f"Ulangi bagian: {last_msg[:100]}", # Dipendekkan agar aman
                     "last_system": sys_last,
                     "step": None
                 })
                 
-                # Langsung tampilkan 3 paragraf terakhir sebagai respon sukses load
-                last_three = "\n\n".join(new_hist[-3:]) if new_hist else "Cerita baru dimulai."
+                # LIMIT PREVIEW AGAR TIDAK ERROR "MESSAGE TOO LONG"
+                preview = "\n\n".join(new_hist[-3:]) if new_hist else "Cerita baru dimulai."
+                if len(preview) > 3000:
+                    preview = "..." + preview[-3000:]
+                
                 await q.message.reply_text(
-                    f"✅ **Slot Dimuat:** {data['save_name']}\n\n{last_three}",
+                    f"✅ **Slot Dimuat:** {data['save_name']}\n\n{preview}",
                     reply_markup=await menu_utama(uid)
                 )
         except Exception as e:
@@ -197,13 +199,12 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text("⚠️ Tidak ada data untuk di-regen.")
             return
         
-        # Hapus baris terakhir sebelum generate ulang
         s["history"].pop()
-        await q.message.reply_text("🔄 Mengulang respons terakhir...")
+        await q.message.reply_text("🔄 Mengulang...")
         
         out, _ = await generate(s["last_prompt"], s["last_system"], s["history"])
         if out:
-            tag = s["last_prompt"].split(":")[0] if ":" in s["last_prompt"] else "AI"
+            tag = "AI"
             s["history"].append(f"[{tag}]: {out}")
             await save(uid, {"history": s["history"]})
             await safe_send(q, out, tag, await menu_utama(uid))
