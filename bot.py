@@ -30,7 +30,8 @@ def fix_state(s):
         "last_prompt": s.get("last_prompt"),
         "last_system": s.get("last_system"),
         "temp_char": s.get("temp_char"),
-        "state": s.get("state", {
+        # 🔥 NEW MEMORY STATE
+        "scene_state": s.get("scene_state", {
             "location": "Tidak diketahui",
             "emotion": "Netral",
             "condition": "Normal"
@@ -47,37 +48,38 @@ async def save(uid, data):
     await users.update_one({"_id": uid}, {"$set": data}, upsert=True)
 
 # ========= MEMORY PARSER =========
-def extract_state(text, old_state):
+def extract_scene_state(text, old_state):
     state = old_state.copy()
 
-    # lokasi
-    loc = re.findall(r"\*\*\*\s*\n\*\*\((.*?)\)\*\*", text)
-    if loc:
-        state["location"] = loc[-1]
+    # lokasi dari format **(Lokasi)**
+    match = re.findall(r"\*\*\((.*?)\)\*\*", text)
+    if match:
+        state["location"] = match[-1]
 
-    # emosi simple detect
-    if any(x in text.lower() for x in ["panik", "gemetar", "takut"]):
+    # emosi
+    low = text.lower()
+    if any(x in low for x in ["panik", "gemetar", "takut", "terburu-buru"]):
         state["emotion"] = "Panik"
-    elif any(x in text.lower() for x in ["marah", "geram"]):
+    elif any(x in low for x in ["marah", "geram"]):
         state["emotion"] = "Marah"
-    elif any(x in text.lower() for x in ["tenang", "lega"]):
+    elif any(x in low for x in ["tenang", "lega"]):
         state["emotion"] = "Tenang"
 
     # kondisi pakaian
-    if "handuk" in text.lower():
+    if "handuk" in low:
         state["condition"] = "Memakai handuk"
 
     return state
 
 # ========= AI =========
-async def generate(prompt, system, history, state):
-    context = "\n---\n".join(history[-12:]) if history else "Start."
+async def generate(prompt, system, history, scene_state):
+    context = "\n---\n".join(history[-15:]) if history else "Start."
 
     state_block = f"""
 [STATE]
-Lokasi: {state['location']}
-Emosi: {state['emotion']}
-Kondisi: {state['condition']}
+Lokasi: {scene_state['location']}
+Emosi: {scene_state['emotion']}
+Kondisi: {scene_state['condition']}
 """
 
     full_input = f"{system}\n\n{state_block}\n\n[MEMORI]\n{context}\n\n[AKSI]\n{prompt}"
@@ -89,123 +91,155 @@ Kondisi: {state['condition']}
                 None,
                 lambda: client_ai.models.generate_content(model=m, contents=full_input)
             )
-            print(f"[AI] {m}")
-            return resp.text.strip()
+            print(f"[AI] Model: {m}")
+            return resp.text.strip(), m
         except:
             continue
 
-    return None
+    return None, None
 
 # ========= PROMPT =========
-def build_system(tag, desc):
+def build_system(tag, desc, scene_state):
     return f"""
-Kamu adalah narator cerita RPG sinematik.
+Kamu adalah RPG Engine berbasis cerita sinematik.
 
-PERAN: {tag}
-DESKRIPSI: {desc}
+PERAN:
+{tag}
 
-ATURAN:
-- Gunakan gaya novel
-- Dialog "..."
-- Aksi *(...)*
-- Tampilkan lokasi jika berubah:
+DESKRIPSI:
+{desc}
+
+STATE SAAT INI:
+Lokasi: {scene_state['location']}
+Emosi: {scene_state['emotion']}
+Kondisi: {scene_state['condition']}
+
+ATURAN WAJIB:
+- Gunakan gaya novel sinematik
+- Dialog pakai "..."
+- Aksi pakai *(...)*
+- Jika pindah lokasi tampilkan:
 ***
-**(Lokasi)**
+**(Nama Lokasi)**
 ***
-- WAJIB konsisten dengan STATE
-- Jangan ubah pakaian/posisi tanpa alasan
-- Jangan buat detail yang bertentangan
-- Jangan buat pilihan angka
-- Fokus imersi
+- WAJIB konsisten dengan kondisi terakhir
+- Jika memakai handuk → jangan ada deskripsi pakaian lain
+- Jangan kontradiksi dengan scene sebelumnya
+- Jangan membuat pilihan angka
+- Fokus ke imersi cerita
 """
 
-# ========= UI =========
-async def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎭 Aksi", callback_data="action")],
-        [InlineKeyboardButton("📖 Riwayat", callback_data="log")],
-        [InlineKeyboardButton("🔄 Regen", callback_data="regen")]
-    ])
+# ========= MENU =========
+async def menu_utama(uid):
+    kb = [
+        [InlineKeyboardButton("📜 Karakter", callback_data="list_all")],
+        [InlineKeyboardButton("🎭 Narator", callback_data="step_narator"),
+         InlineKeyboardButton("⏩ Lanjut", callback_data="lanjut")],
+        [InlineKeyboardButton("📖 Riwayat", callback_data="export_logs")],
+        [InlineKeyboardButton("↩️ Undo", callback_data="undo"),
+         InlineKeyboardButton("🔄 Regen", callback_data="regen")],
+        [InlineKeyboardButton("🧹 Reset", callback_data="reset_confirm")]
+    ]
+    return InlineKeyboardMarkup(kb)
 
 # ========= SAFE SEND =========
-async def send(update, text, state):
-    footer = f"\n\n━━━━━━━━━━━━━━\n📍 {state['location']}\n😈 {state['emotion']}\n👕 {state['condition']}\n━━━━━━━━━━━━━━"
+async def safe_send(obj, text, tag, markup):
+    if hasattr(obj, "message"):
+        target = obj.message
+    elif hasattr(obj, "effective_message"):
+        target = obj.effective_message
+    else:
+        target = obj
+
+    text = text.replace("\n\n\n", "\n\n")
 
     try:
-        await update.effective_message.reply_text(text + footer)
+        await target.reply_text(f"✨ *{tag}*\n\n{text}", parse_mode="Markdown", reply_markup=markup)
     except:
-        await update.effective_message.reply_text(text)
+        await target.reply_text(f"✨ {tag}\n\n{text}", reply_markup=markup)
 
 # ========= START =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await save(update.effective_user.id, {
+        "name": None,
         "step": "set_name",
         "history": [],
-        "state": {
+        "chars": [],
+        "scene_state": {
             "location": "Kamar",
             "emotion": "Netral",
             "condition": "Normal"
         }
     })
-    await update.message.reply_text("Nama karakter?")
+    await update.message.reply_text("🎮 RPG Engine\n\nNama Tokoh Utama?")
 
 # ========= MESSAGE =========
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    text = update.message.text
+    uid, text = update.effective_user.id, update.message.text
     s = await get_state(uid)
 
     if s["step"] == "set_name":
         await save(uid, {"name": text, "step": None})
-        await update.message.reply_text(f"Mulai cerita, {text}.", reply_markup=await menu())
+        await update.message.reply_text(f"Halo {text}!", reply_markup=await menu_utama(uid))
         return
 
-    if s["step"] == "action":
-        system = build_system(s["name"], s["desc_utama"])
-        out = await generate(text, system, s["history"], s["state"])
+    # ========= ACTION =========
+    if s["step"] in ["action", "narator_input"]:
+        is_nar = (s["step"] == "narator_input")
+        idx = s.get("selected", -1)
+
+        tag = "NARASI" if is_nar else (s["name"] if idx == -1 else s["chars"][idx]["name"])
+        desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
+
+        system = build_system(tag, desc, s["scene_state"])
+        prompt = f"KEJADIAN: {text}" if is_nar else f"AKSI: {text}"
+
+        await save(uid, {"last_prompt": prompt, "last_system": system})
+
+        out, _ = await generate(prompt, system, s["history"], s["scene_state"])
 
         if out:
-            new_state = extract_state(out, s["state"])
-            s["history"].append(out)
+            new_state = extract_scene_state(out, s["scene_state"])
+            s["history"].append(f"[{tag}]: {out}")
 
             await save(uid, {
                 "history": s["history"],
-                "state": new_state,
-                "step": None
+                "step": None,
+                "scene_state": new_state
             })
 
-            await send(update, out, new_state)
+            await safe_send(update, out, tag, await menu_utama(uid))
+        else:
+            await update.message.reply_text("⚠️ AI sibuk.", reply_markup=await menu_utama(uid))
 
 # ========= CALLBACK =========
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    uid = q.from_user.id
-    s = await get_state(uid)
+    uid, s = q.from_user.id, await get_state(q.from_user.id)
     await q.answer()
 
-    if q.data == "action":
-        await save(uid, {"step": "action"})
-        await q.message.reply_text("Aksi kamu?")
-
-    elif q.data == "log":
-        text = "\n\n".join(s["history"])
-        file = io.BytesIO(text.encode())
-        file.name = "story.txt"
-        await q.message.reply_document(file)
+    if q.data == "step_narator":
+        await save(uid, {"step": "narator_input"})
+        await q.message.reply_text("🎭 Kejadian apa?")
 
     elif q.data == "regen":
-        if not s["history"]:
+        if not s.get("last_prompt") or not s["history"]:
+            await q.message.reply_text("⚠️ Tidak bisa regen.")
             return
 
         s["history"].pop()
-        out = await generate(s["last_prompt"], s["last_system"], s["history"], s["state"])
+        out, _ = await generate(s["last_prompt"], s["last_system"], s["history"], s["scene_state"])
 
         if out:
-            new_state = extract_state(out, s["state"])
-            s["history"].append(out)
+            new_state = extract_scene_state(out, s["scene_state"])
+            s["history"].append(f"[REGEN]: {out}")
 
-            await save(uid, {"history": s["history"], "state": new_state})
-            await send(q, out, new_state)
+            await save(uid, {
+                "history": s["history"],
+                "scene_state": new_state
+            })
+
+            await safe_send(q, out, "REGEN", await menu_utama(uid))
 
 # ========= RUN =========
 if __name__ == "__main__":
@@ -215,5 +249,5 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
 
-    print("🔥 MEMORY RPG READY")
+    print("🔥 PATCH MEMORY SYSTEM READY")
     app.run_polling()
