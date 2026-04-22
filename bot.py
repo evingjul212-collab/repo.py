@@ -40,9 +40,10 @@ async def get_state(uid):
 async def save(uid, data):
     await users.update_one({"_id": uid}, {"$set": data}, upsert=True)
 
-# ========= AI ENGINE (STRICT POV) =========
+# ========= AI ENGINE (DIALOG FOCUS) =========
 async def generate(prompt, system, history):
-    context = "\n---\n".join(history[-12:]) if history else "Mulai cerita."
+    # Mengambil 12 history terakhir untuk konteks
+    context = "\n---\n".join(history[-12:]) if history else "Mulai."
     full_input = f"{system}\n\n[MEMORI CERITA]\n{context}\n\n[AKSI SEKARANG]\n{prompt}"
     for m in MODELS:
         try:
@@ -54,15 +55,20 @@ async def generate(prompt, system, history):
 
 def build_system(target_name, desc, referensi, role_type="NPC"):
     if role_type == "UTAMA":
-        pov = f"Kamu adalah {target_name} (Tokoh Utama). Gunakan kata ganti 'Aku'!"
+        pov = f"Kamu {target_name} (Utama). Pakai 'Aku'."
     elif role_type == "NARATOR":
-        pov = "Kamu adalah Narator/Dunia. Ceritakan secara deskriptif."
+        pov = "Kamu Narator. Fokus pada dialog antar karakter."
     else:
-        pov = f"Kamu adalah {target_name} (NPC). JANGAN gunakan 'Aku', sebut dirimu '{target_name}'."
+        pov = f"Kamu {target_name} (NPC). Sebut dirimu '{target_name}'."
 
-    return f"""Kamu RPG Engine. Plot Dunia: {referensi}.
-Role Kamu: {pov}. Deskripsi: {desc}.
-Aturan: Dialog "...". Narasi *(...)*. Max 3 paragraf."""
+    return f"""Kamu RPG Engine. Plot: {referensi}.
+Role: {pov}. Deskripsi: {desc}.
+
+ATURAN GAYA CERITA:
+1. UTAMAKAN DIALOG (60-80% respons harus berisi percakapan).
+2. NARASI SINGKAT & PADAT (Hanya untuk aksi atau ekspresi penting).
+3. Format: "Dialog" *(Aksi/Ekspresi)*.
+4. Jangan ceramah panjang lebar. Biarkan karakter saling bicara."""
 
 # ========= UI MENU =========
 async def menu_utama(uid):
@@ -74,36 +80,55 @@ async def menu_utama(uid):
         [InlineKeyboardButton("↩️ Undo", callback_data="undo"), InlineKeyboardButton("🧹 Reset", callback_data="reset_confirm")]
     ])
 
-async def safe_send(obj, text, tag, markup):
+async def display_story(obj, s, new_text=None, tag=None):
+    """
+    Logika Menampilkan 1 cerita sebelumnya + cerita terbaru agar tidak terputus.
+    """
+    history = s.get("history", [])
+    display_text = ""
+    
+    # Ambil 1 pesan terakhir dari history sebagai 'background' (jika ada)
+    if len(history) > 1:
+        prev_msg = history[-2] if not new_text else history[-1]
+        display_text += f"_{prev_msg}_\n\n"
+        display_text += "─── *Terbaru* ───\n\n"
+
+    # Tambahkan pesan terbaru
+    if new_text:
+        display_text += f"✨ **{tag}**\n{new_text}"
+    elif history:
+        last_msg = history[-1]
+        display_text += f"{last_msg}"
+    else:
+        display_text = "Siap memulai cerita..."
+
     target = obj.message if hasattr(obj, "message") else obj.effective_message
-    try: await target.reply_text(f"✨ **{tag}**\n\n{text}", parse_mode="Markdown", reply_markup=markup)
-    except: await target.reply_text(f"✨ {tag}\n\n{text}", reply_markup=markup)
+    try:
+        await target.reply_text(display_text, parse_mode="Markdown", reply_markup=await menu_utama(s["_id"]))
+    except:
+        await target.reply_text(display_text, reply_markup=await menu_utama(s["_id"]))
 
 # ========= HANDLERS =========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     await save(uid, {"step": "set_referensi", "history": [], "chars": [], "referensi": ""})
-    await update.message.reply_text("🎮 RPG Engine Siap.\n\nMasukkan Referensi Plot & Nama Tokoh Utama (Contoh: Cerita Kerajaan, Tokoh: Bayu):")
+    await update.message.reply_text("🎮 RPG Engine Aktif.\n\nMasukkan Referensi Plot & Nama Tokoh Utama (Contoh: Kerajaan Bali, Tokoh: Bayu):")
 
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
 
-    # AUTO GENERATE SETELAH INPUT PLOT PERTAMA
     if s["step"] == "set_referensi":
-        # Coba ambil nama tokoh dari input (asumsi format "Tokoh: Nama")
         name = "Bayu"
         if "Tokoh:" in text: name = text.split("Tokoh:")[1].strip().split()[0]
-        
         await save(uid, {"referensi": text, "name": name, "step": None})
-        await update.message.reply_text(f"✅ Plot & Tokoh {name} disimpan. Memulai cerita...")
         
-        # Langsung Generate Narasi Awal
-        sys = build_system("NARASI", "Dunia Cerita", text, "NARATOR")
-        out, _ = await generate("Mulai cerita dari awal berdasarkan plot.", sys, [])
+        # Start Awal
+        sys = build_system("NARASI", "Dunia", text, "NARATOR")
+        out, _ = await generate("Mulai cerita dengan banyak dialog.", sys, [])
         if out:
-            s["history"].append(f"[NARASI]: {out}")
+            s["history"].append(f"**[NARASI]**: {out}")
             await save(uid, {"history": s["history"], "last_system": sys, "last_prompt": "Mulai cerita."})
-            await safe_send(update, out, "NARASI", await menu_utama(uid))
+            await display_story(update, s)
         return
 
     if s["step"] == "save_name_input":
@@ -114,69 +139,68 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if s["step"] == "updating_referensi":
         await save(uid, {"referensi": text, "step": None})
-        await update.message.reply_text("✅ Referensi Plot diperbarui.", reply_markup=await menu_utama(uid))
+        await update.message.reply_text("✅ Plot Diperbarui.", reply_markup=await menu_utama(uid))
         return
 
-    if s["step"] == "char_name":
-        await save(uid, {"temp_char": text, "step": "char_desc"})
-        await update.message.reply_text(f"Deskripsi untuk {text}?"); return
+    if s["step"] in ["action", "narator_input", "char_name", "char_desc"]:
+        # Logika input karakter tetap seperti sebelumnya
+        if s["step"] == "char_name":
+            await save(uid, {"temp_char": text, "step": "char_desc"})
+            await update.message.reply_text(f"Deskripsi {text}?"); return
+        if s["step"] == "char_desc":
+            s["chars"].append({"name": s["temp_char"], "desc": text})
+            await save(uid, {"chars": s["chars"], "step": None})
+            await update.message.reply_text(f"✅ NPC {s['temp_char']} aktif.", reply_markup=await menu_utama(uid)); return
 
-    if s["step"] == "char_desc":
-        s["chars"].append({"name": s["temp_char"], "desc": text})
-        await save(uid, {"chars": s["chars"], "step": None})
-        await update.message.reply_text(f"✅ NPC {s['temp_char']} aktif.", reply_markup=await menu_utama(uid)); return
-
-    if s["step"] in ["action", "narator_input"]:
+        # Logika Aksi Cerita
         idx = s["selected"]; is_u = (idx == -1)
         tag = s["name"] if is_u else s["chars"][idx]["name"]
         desc = s["desc_utama"] if is_u else s["chars"][idx]["desc"]
         r_type = "UTAMA" if is_u else "NPC"
-        
         if s["step"] == "narator_input": tag, desc, r_type = "NARASI", "Dunia", "NARATOR"
 
         sys = build_system(tag, desc, s["referensi"], r_type)
         prompt = f"{tag} beraksi: {text}"
         out, _ = await generate(prompt, sys, s["history"])
         if out:
-            s["history"].append(f"[{tag}]: {out}")
+            s["history"].append(f"**[{tag}]**: {out}")
             await save(uid, {"history": s["history"], "step": None, "last_prompt": prompt, "last_system": sys})
-            await safe_send(update, out, tag, await menu_utama(uid))
+            await display_story(update, s)
 
 # ========= CALLBACK =========
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
 
     if q.data == "export_logs":
-        if not s["history"]: await q.message.reply_text("Riwayat kosong."); return
-        txt = "RIWAYAT CERITA RPG\n\n" + "\n\n".join(s["history"])
-        f = io.BytesIO(txt.encode()); f.name = "riwayat_cerita.txt"
-        await context.bot.send_document(chat_id=uid, document=f, caption="📜 Seluruh isi cerita sejauh ini.")
+        if not s["history"]: return
+        txt = "RIWAYAT RPG\n\n" + "\n\n".join(s["history"])
+        f = io.BytesIO(txt.encode()); f.name = "riwayat.txt"
+        await context.bot.send_document(chat_id=uid, document=f, caption="📜 Riwayat Lengkap.")
 
     elif q.data == "edit_ref":
         await save(uid, {"step": "updating_referensi"})
-        await q.message.reply_text(f"📝 **Plot Saat Ini:**\n\n`{s['referensi']}`\n\nSilakan masukkan Plot baru atau tambahkan detailnya:", parse_mode="Markdown")
+        await q.message.reply_text(f"📝 **Plot Saat Ini:**\n\n`{s['referensi']}`\n\nMasukkan Plot baru:", parse_mode="Markdown")
 
     elif q.data == "list_all":
         kb = [[InlineKeyboardButton(f"🌟 {s['name']} (Utama)", callback_data="sel_-1")]]
         for i, c in enumerate(s["chars"]): kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
         kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
-        await q.edit_message_text("Kontrol Karakter:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("Pilih Karakter:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1]); name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         await save(uid, {"selected": idx, "step": "action"})
-        await q.message.reply_text(f"🕹️ Mengontrol: **{name}**. Masukkan aksi:")
+        await q.message.reply_text(f"🕹️ Kontrol: **{name}**. Masukkan aksi:")
 
     elif q.data == "add_npc":
-        await save(uid, {"step": "char_name"})
-        await q.message.reply_text("Nama NPC?")
+        await save(uid, {"step": "char_name"}); await q.message.reply_text("Nama NPC?")
 
     elif q.data == "save_manual":
         await save(uid, {"step": "save_name_input"}); await q.message.reply_text("Nama Slot?")
 
     elif q.data == "load_list":
         cursor = archives.find({"user_id": uid}).sort("date", -1); items = await cursor.to_list(10)
-        if not items: await q.message.reply_text("Tidak ada simpanan."); return
+        if not items: await q.message.reply_text("Kosong."); return
         kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load:{str(i['_id'])}")] for i in items]
         await q.edit_message_text("Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -185,32 +209,38 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if data:
             h = data.get("history", [])
             await save(uid, {"history": h, "chars": data.get("chars", []), "referensi": data.get("referensi", ""), "step": None})
-            await q.message.reply_text(f"✅ Load Slot: {data['save_name']}", reply_markup=await menu_utama(uid))
+            await q.message.reply_text(f"✅ Loaded: {data['save_name']}")
+            await display_story(q, data)
 
     elif q.data == "regen":
         if not s["history"]: return
-        s["history"].pop(); await q.message.reply_text("🔄 Mengulang..."); out, _ = await generate(s["last_prompt"], s["last_system"], s["history"])
+        s["history"].pop(); await q.message.reply_text("🔄 Mengulang...")
+        out, _ = await generate(s["last_prompt"], s["last_system"], s["history"])
         if out:
             tag = s["last_prompt"].split(" beraksi")[0]
-            s["history"].append(f"[{tag}]: {out}"); await save(uid, {"history": s["history"]}); await safe_send(q, out, tag, await menu_utama(uid))
+            s["history"].append(f"**[{tag}]**: {out}"); await save(uid, {"history": s["history"]})
+            await display_story(q, s)
 
     elif q.data == "undo":
-        if s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Undo Berhasil.")
+        if s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Undo.")
 
-    elif q.data == "main_menu": await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama(uid))
+    elif q.data == "main_menu": 
+        # Saat kembali ke menu, tetap tampilkan potongan cerita terakhir agar tidak 'kosong'
+        await display_story(q, s)
 
     elif q.data == "step_narator":
-        await save(uid, {"step": "narator_input"}); await q.message.reply_text("Narasi kejadian dunia?")
+        await save(uid, {"step": "narator_input"}); await q.message.reply_text("Masukkan kejadian dunia:")
 
     elif q.data == "lanjut":
         sys = build_system("NARASI", "Dunia", s["referensi"], "NARATOR")
-        out, _ = await generate("Lanjutkan cerita.", sys, s["history"])
+        out, _ = await generate("Lanjutkan dengan banyak dialog.", sys, s["history"])
         if out:
-            s["history"].append(f"[NARASI]: {out}"); await save(uid, {"history": s["history"]}); await safe_send(q, out, "NARASI", await menu_utama(uid))
+            s["history"].append(f"**[NARASI]**: {out}"); await save(uid, {"history": s["history"]})
+            await display_story(q, s)
 
     elif q.data == "reset_confirm":
         await save(uid, {"history": [], "chars": [], "step": "set_referensi", "referensi": ""})
-        await q.message.reply_text("🧹 Data direset. Masukkan Plot & Tokoh Baru:")
+        await q.message.reply_text("🧹 Reset. Masukkan Plot Baru:")
 
 if __name__ == "__main__":
     try: requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=5)
