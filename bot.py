@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from motor.motor_asyncio import AsyncIOMotorClient
 from google import genai
 from datetime import datetime
+from bson import ObjectId
 
 # ========= CONFIG =========
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -150,34 +151,70 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
 
     if q.data == "load_list":
-        cursor = archives.find({"user_id": uid}).sort("_id", -1); items = await cursor.to_list(length=10)
-        if not items: await q.message.reply_text("📂 Kosong."); return
-        kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load_{i['_id']}")] for i in items]
+        cursor = archives.find({"user_id": uid}).sort("_id", -1)
+        items = await cursor.to_list(length=10)
+        if not items:
+            await q.message.reply_text("📂 Tidak ada arsip.")
+            return
+        kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load:{str(i['_id'])}")] for i in items]
         kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
-        await q.edit_message_text("📂 Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("📂 Pilih Slot untuk Muat:", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif q.data.startswith("load_"):
-        from bson import ObjectId
-        data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
-        if data:
-            await save(uid, {"history": data["history"], "chars": data["chars"], "referensi": data.get("referensi", "")})
-            last_three = "\n\n".join(data["history"][-3:]) if data["history"] else "Baru dimulai."
-            await q.message.reply_text(f"✅ Load: {data['save_name']}\n\n{last_three}", reply_markup=await menu_utama(uid))
+    elif q.data.startswith("load:"):
+        slot_id = q.data.split(":")[1]
+        try:
+            data = await archives.find_one({"_id": ObjectId(slot_id)})
+            if data:
+                new_hist = data.get("history", [])
+                ref = data.get("referensi", "Belum ada referensi.")
+                
+                # --- FIX REGEN SETELAH LOAD ---
+                # Kita set agar Regen mengulang baris terakhir dari history yang baru dimuat
+                last_msg = new_hist[-1] if new_hist else "Mulai cerita."
+                tag_last = last_msg.split("]:")[0].replace("[", "") if "]:" in last_msg else "NARASI"
+                sys_last = build_system(tag_last, "Karakter", ref)
+
+                await save(uid, {
+                    "history": new_hist,
+                    "chars": data.get("chars", []),
+                    "referensi": ref,
+                    "last_prompt": f"Lanjutkan aksi terakhir: {last_msg}",
+                    "last_system": sys_last,
+                    "step": None
+                })
+                
+                # Langsung tampilkan 3 paragraf terakhir sebagai respon sukses load
+                last_three = "\n\n".join(new_hist[-3:]) if new_hist else "Cerita baru dimulai."
+                await q.message.reply_text(
+                    f"✅ **Slot Dimuat:** {data['save_name']}\n\n{last_three}",
+                    reply_markup=await menu_utama(uid)
+                )
+        except Exception as e:
+            await q.message.reply_text(f"⚠️ Gagal muat: {str(e)}")
+
+    elif q.data == "regen":
+        if not s.get("last_prompt") or not s["history"]:
+            await q.message.reply_text("⚠️ Tidak ada data untuk di-regen.")
+            return
+        
+        # Hapus baris terakhir sebelum generate ulang
+        s["history"].pop()
+        await q.message.reply_text("🔄 Mengulang respons terakhir...")
+        
+        out, _ = await generate(s["last_prompt"], s["last_system"], s["history"])
+        if out:
+            tag = s["last_prompt"].split(":")[0] if ":" in s["last_prompt"] else "AI"
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"]})
+            await safe_send(q, out, tag, await menu_utama(uid))
 
     elif q.data == "lanjut":
         sys = build_system("NARASI", "Narator", s["referensi"])
         out, _ = await generate("Lanjutkan alur cerita.", sys, s["history"])
         if out:
             s["history"].append(f"[NARASI]: {out}")
-            await save(uid, {"history": s["history"], "last_prompt": "Lanjutkan.", "last_system": sys})
+            await save(uid, {"history": s["history"], "last_prompt": "Lanjutkan alur.", "last_system": sys})
             await safe_send(q, out, "NARASI", await menu_utama(uid))
-
-    elif q.data == "regen":
-        if not s.get("last_prompt") or not s["history"]: return
-        s["history"].pop(); out, _ = await generate(s["last_prompt"], s["last_system"], s["history"])
-        if out:
-            tag = s["last_prompt"].split(":")[0] if ":" in s["last_prompt"] else "AI"
-            s["history"].append(f"[{tag}]: {out}"); await save(uid, {"history": s["history"]}); await safe_send(q, out, tag, await menu_utama(uid))
 
     elif q.data == "export_logs":
         if not s["history"]: return
@@ -212,7 +249,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await save(uid, {"history": [], "chars": [], "step": None, "referensi": "Belum ada."}); await q.message.reply_text("🧹 Reset.")
     elif q.data == "main_menu" or q.data == "step_narator":
         if q.data == "step_narator": await save(uid, {"step": "narator_input"}); await q.message.reply_text("Kejadian?")
-        else: await q.edit_message_text("Menu:", reply_markup=await menu_utama(uid))
+        else: await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama(uid))
 
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
