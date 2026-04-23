@@ -193,7 +193,8 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data == "npc_list":
         kb = []
         for i, c in enumerate(s["chars"]):
-            kb.append([InlineKeyboardButton(c["name"], callback_data=f"npc_{i}")])
+            preview = c.get("desc", "")[:20]
+            kb.append([InlineKeyboardButton(f"{c['name']} | {preview}...", callback_data=f"npc_{i}")])
         kb.append([InlineKeyboardButton("⬅️ Kembali", callback_data="menu_char")])
         await q.edit_message_text("NPC:", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -242,10 +243,10 @@ Buat seperti adegan film.
         out, _ = await generate(prompt, sys, [], mode="CREATIVE")
 
         if out:
-            await save(uid, {"history": [out]})
+            await save(uid, {"history": [out], "step": None})
             await q.message.reply_text(out, reply_markup=await menu_utama())
 
-    # ===== LANJUT =====
+    # ===== LANJUT (AI DIRECTOR) =====
     elif q.data == "lanjut":
         if not s["history"]:
             await q.message.reply_text("Mulai cerita dulu dari NPC.")
@@ -277,21 +278,54 @@ Lanjutkan cerita:
             await save(uid, {"history": s["history"]})
             await q.message.reply_text(out, reply_markup=await menu_utama())
 
-    # ===== LOAD =====
+    # ===== LOAD (FIXED UX) =====
     elif q.data == "load_list":
         items = await archives.find({"user_id": uid}).sort("date", -1).to_list(10)
         if not items:
             await q.message.reply_text("Kosong.")
             return
-        kb = [[InlineKeyboardButton(i["save_name"], callback_data=f"load:{i['_id']}")] for i in items]
-        await q.edit_message_text("Load:", reply_markup=InlineKeyboardMarkup(kb))
+
+        kb = []
+        for i in items:
+            preview = i["history"][-1][:25] if i.get("history") else "Kosong"
+            kb.append([InlineKeyboardButton(f"{i['save_name']} | {preview}...", callback_data=f"load:{i['_id']}")])
+
+        await q.edit_message_text("Pilih Save:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("load:"):
         sid = q.data.split(":")[1]
         data = await archives.find_one({"_id": ObjectId(sid)})
+
         if data:
-            await save(uid, {"history": data["history"], "chars": data["chars"]})
-            await q.message.reply_text("Loaded!", reply_markup=await menu_utama())
+            history = data.get("history", [])
+            chars = data.get("chars", [])
+
+            await save(uid, {
+                "history": history,
+                "chars": chars,
+                "step": "action",
+                "selected": -1
+            })
+
+            if not history:
+                await q.message.reply_text("⚠️ Save kosong.", reply_markup=await menu_utama())
+                return
+
+            last_story = history[-1]
+            tag = "NARASI"
+
+            if last_story.startswith("["):
+                try:
+                    tag = last_story.split("]")[0].replace("[", "")
+                    last_story = last_story.split("] ", 1)[1]
+                except:
+                    pass
+
+            await q.message.reply_text(
+                f"📂 **Load Berhasil!**\n\n🎭 Terakhir: **{tag}**\n\n{last_story}",
+                parse_mode="Markdown",
+                reply_markup=await menu_utama()
+            )
 
     # ===== SAVE =====
     elif q.data == "save_manual":
@@ -314,4 +348,3 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
 
     app.run_polling()
-    
