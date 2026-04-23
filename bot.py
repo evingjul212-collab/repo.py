@@ -72,7 +72,7 @@ async def menu_utama():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     await save(uid, {"history": [], "chars": [], "step": None})
-    await update.message.reply_text("🎮 Mulai RPG", reply_markup=await menu_utama())
+    await update.message.reply_text("🎮 Mulai RPG v.1.1", reply_markup=await menu_utama())
 
 # ========= MESSAGE =========
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
