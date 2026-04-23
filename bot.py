@@ -1,6 +1,5 @@
 import os
 import asyncio
-import io
 import random
 import requests
 from datetime import datetime
@@ -35,9 +34,7 @@ async def get_state(uid):
         "chars": s.get("chars", []),
         "selected": s.get("selected", -1),
         "step": s.get("step"),
-        "temp_char": s.get("temp_char"),
-        "last_prompt": s.get("last_prompt"),
-        "last_system": s.get("last_system")
+        "temp_char": s.get("temp_char")
     }
 
 async def save(uid, data):
@@ -68,16 +65,13 @@ Kamu adalah {name}.
 Deskripsi: {desc}
 
 Aturan:
-- Dialog dominan (60-80%)
+- Dialog dominan
 - Karakter hidup & emosional
-- Boleh inisiatif bicara
 - Jangan kaku
 - Maks 3 paragraf
 """
-
     if role == "NARATOR":
-        base += "\nFokus membangun suasana, konflik, dan interaksi."
-
+        base += "\nFokus narasi & konflik."
     return base
 
 # ========= MENU =========
@@ -142,7 +136,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
 
-        style = random.choice(["dramatis", "tegang", "ringan", "emosional"])
+        style = random.choice(["dramatis", "tegang", "ringan"])
 
         sys = build_system(name, desc, "CHAR")
 
@@ -151,7 +145,7 @@ Gaya: {style}
 
 AKSI: {text}
 
-Lanjutkan cerita + reaksi karakter lain.
+Lanjutkan cerita.
 """
 
         out, _ = await generate(prompt, sys, s["history"], mode="FAST")
@@ -168,53 +162,41 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = await get_state(uid)
     await q.answer()
 
-    # ===== MENU KARAKTER =====
     if q.data == "menu_char":
         kb = [
-            [InlineKeyboardButton("🧍 Tokoh Utama", callback_data="main_char")],
-            [InlineKeyboardButton("👥 Daftar NPC", callback_data="npc_list")],
+            [InlineKeyboardButton("🧍 Tokoh Utama", callback_data="use_main")],
+            [InlineKeyboardButton("👥 NPC", callback_data="npc_list")],
             [InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc")],
             [InlineKeyboardButton("⬅️ Kembali", callback_data="main_menu")]
         ]
         await q.edit_message_text("Menu Karakter:", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif q.data == "main_char":
-        kb = [
-            [InlineKeyboardButton("🎮 Gunakan", callback_data="use_main")],
-            [InlineKeyboardButton("⬅️ Kembali", callback_data="menu_char")]
-        ]
-        await q.edit_message_text("Tokoh Utama", reply_markup=InlineKeyboardMarkup(kb))
-
     elif q.data == "use_main":
         await save(uid, {"selected": -1, "step": "action"})
         await q.message.reply_text("Ketik aksi kamu:")
 
-    # ===== NPC LIST =====
     elif q.data == "npc_list":
         kb = []
         for i, c in enumerate(s["chars"]):
-            preview = c.get("desc", "")[:20]
-            kb.append([InlineKeyboardButton(f"{c['name']} | {preview}...", callback_data=f"npc_{i}")])
+            kb.append([InlineKeyboardButton(c["name"], callback_data=f"npc_{i}")])
         kb.append([InlineKeyboardButton("⬅️ Kembali", callback_data="menu_char")])
-        await q.edit_message_text("NPC:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("Daftar NPC:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("npc_"):
         idx = int(q.data.split("_")[1])
         npc = s["chars"][idx]
-
         kb = [
             [InlineKeyboardButton("🎮 Gunakan", callback_data=f"use_npc_{idx}")],
             [InlineKeyboardButton("📖 Cerita Baru", callback_data=f"story_npc_{idx}")],
             [InlineKeyboardButton("⬅️ Kembali", callback_data="npc_list")]
         ]
-        await q.edit_message_text(f"{npc['name']}", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text(npc["name"], reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("use_npc_"):
         idx = int(q.data.split("_")[2])
         await save(uid, {"selected": idx, "step": "action"})
         await q.message.reply_text("Ketik aksi NPC:")
 
-    # ===== CERITA BARU NPC =====
     elif q.data.startswith("story_npc_"):
         idx = int(q.data.split("_")[2])
         npc = s["chars"][idx]
@@ -226,27 +208,20 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sys = build_system("Narator", npc["desc"], "NARATOR")
 
         prompt = f"""
-Mulai cerita dari situasi ini:
+Mulai cerita dari situasi:
 
 {npc['desc']}
 
-Karakter:
-- {s['name']}
-- {npc['name']}
-
 Dialog awal:
 {npc['intro']}
-
-Buat seperti adegan film.
 """
 
         out, _ = await generate(prompt, sys, [], mode="CREATIVE")
 
         if out:
-            await save(uid, {"history": [out], "step": None})
+            await save(uid, {"history": [out]})
             await q.message.reply_text(out, reply_markup=await menu_utama())
 
-    # ===== LANJUT (AI DIRECTOR) =====
     elif q.data == "lanjut":
         if not s["history"]:
             await q.message.reply_text("Mulai cerita dulu dari NPC.")
@@ -255,21 +230,8 @@ Buat seperti adegan film.
         sys = build_system("Narator", "Dunia", "NARATOR")
 
         mode = random.choice(["FAST", "CREATIVE"])
-        twist = random.choice([
-            "konflik muncul",
-            "kejadian tak terduga",
-            "emosi meningkat",
-            "situasi jadi tegang"
-        ])
 
-        prompt = f"""
-Lanjutkan cerita:
-
-- Tambahkan {twist}
-- Libatkan karakter
-- Jangan datar
-- Akhiri dengan cliffhanger
-"""
+        prompt = "Lanjutkan cerita dengan konflik atau kejadian baru."
 
         out, _ = await generate(prompt, sys, s["history"], mode=mode)
 
@@ -278,7 +240,6 @@ Lanjutkan cerita:
             await save(uid, {"history": s["history"]})
             await q.message.reply_text(out, reply_markup=await menu_utama())
 
-    # ===== LOAD (FIXED UX) =====
     elif q.data == "load_list":
         items = await archives.find({"user_id": uid}).sort("date", -1).to_list(10)
         if not items:
@@ -288,7 +249,7 @@ Lanjutkan cerita:
         kb = []
         for i in items:
             preview = i["history"][-1][:25] if i.get("history") else "Kosong"
-            kb.append([InlineKeyboardButton(f"{i['save_name']} | {preview}...", callback_data=f"load:{i['_id']}")])
+            kb.append([InlineKeyboardButton(f"{i['save_name']} | {preview}", callback_data=f"load:{i['_id']}")])
 
         await q.edit_message_text("Pilih Save:", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -308,7 +269,7 @@ Lanjutkan cerita:
             })
 
             if not history:
-                await q.message.reply_text("⚠️ Save kosong.", reply_markup=await menu_utama())
+                await q.message.reply_text("Save kosong.", reply_markup=await menu_utama())
                 return
 
             last_story = history[-1]
@@ -322,12 +283,10 @@ Lanjutkan cerita:
                     pass
 
             await q.message.reply_text(
-                f"📂 **Load Berhasil!**\n\n🎭 Terakhir: **{tag}**\n\n{last_story}",
-                parse_mode="Markdown",
+                f"Load berhasil!\n\nTerakhir: {tag}\n\n{last_story}",
                 reply_markup=await menu_utama()
             )
 
-    # ===== SAVE =====
     elif q.data == "save_manual":
         await save(uid, {"step": "save_name"})
         await q.message.reply_text("Nama save?")
