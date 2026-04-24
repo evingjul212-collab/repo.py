@@ -276,14 +276,50 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text_display = f"Karakter: {name}\n\nInfo: {info}"
         await q.edit_message_text(text_display, reply_markup=InlineKeyboardMarkup(kb))
-    elif q.data.startswith("new_story_"):
-        idx = int(q.data.split("_")[1])
+   elif q.data.startswith("new_story_"):
+        # Mengambil angka setelah underscore terakhir
+        # Contoh: "new_story_-1" -> "-1"
+        try:
+            idx = int(q.data.rsplit("_", 1)[1])
+        except (IndexError, ValueError):
+            # Fallback jika split gagal
+            idx = s.get("selected", -1)
+        
+        # Ambil data terbaru dari database
+        s = await get_state(uid) 
+        
+        # Tentukan identitas
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
         
-        # Membersihkan riwayat untuk memulai alur baru
-        s["history"] = []
+        # Reset History
+        new_history = []
         system_prompt = build_system(name, desc)
+        
+        # Prompt Instruksi
+        instruction = (
+            f"Mulai cerita baru sebagai {name}. "
+            f"Latar belakang: {desc}. "
+            f"Buat adegan pembuka novel visual yang dramatis."
+        )
+        
+        await q.message.reply_text(f"🎬 Memulai cerita baru: {name}...")
+        
+        # Generate
+        out, _ = await generate(instruction, system_prompt, new_history)
+        
+        if out:
+            new_history.append(f"[{name}]: {out}")
+            await save(uid, {
+                "history": new_history,
+                "selected": idx,
+                "last_prompt": instruction,
+                "last_system": system_prompt,
+                "step": None
+            })
+            await safe_send(q, out, name, await menu_utama(uid))
+        else:
+            await q.message.reply_text("⚠️ AI sedang sibuk. Coba klik 🔄 Regen.", reply_markup=await menu_utama(uid))
         
         # Prompt otomatis mengambil dari deskripsi karakter
         starting_prompt = f"Buat adegan pembuka yang dramatis untuk {name} berdasarkan deskripsi ini: {desc}"
