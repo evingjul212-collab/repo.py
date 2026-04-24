@@ -80,27 +80,44 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     s = await get_state(uid)
 
-    # ===== EDIT =====
-    if s["step"] == "edit_name":
-        if s["edit_target"] == "main":
-            await save(uid, {"name": text, "step": "edit_desc"})
-            await update.message.reply_text("Deskripsi tokoh utama?")
-        else:
-            idx = s["edit_target"]
-            chars = s["chars"]
-            chars[idx]["name"] = text
-            await save(uid, {"chars": chars, "step": "edit_desc"})
-            await update.message.reply_text("Deskripsi NPC?")
-        return
+   # ===== MENU KARAKTER =====
+    if q.data == "menu_char":
+        kb = [
+            [InlineKeyboardButton("🧍 Tokoh Utama", callback_data="main_char")],
+            [InlineKeyboardButton("👥 NPC", callback_data="npc_list")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="main_menu")]
+        ]
+        await q.edit_message_text("Menu Karakter", reply_markup=InlineKeyboardMarkup(kb))
 
-    if s["step"] == "edit_desc":
-        if s["edit_target"] == "main":
-            await save(uid, {"desc_utama": text, "step": None})
-        else:
-            idx = s["edit_target"]
-            chars = s["chars"]
-            chars[idx]["desc"] = text
-            await save(uid, {"chars": chars, "step": None})
+    elif q.data == "main_char":
+        kb = [
+            [InlineKeyboardButton("✏️ Edit", callback_data="edit_main")],
+            [InlineKeyboardButton("🎮 Gunakan", callback_data="use_main")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="menu_char")]
+        ]
+        await q.edit_message_text("Tokoh Utama", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data == "edit_main":
+        await save(uid, {"step": "edit_name", "edit_target": "main"})
+        await q.message.reply_text("Nama baru tokoh utama?")
+
+    elif q.data == "npc_list":
+        kb = [[InlineKeyboardButton(c["name"], callback_data=f"npc_{i}")] for i,c in enumerate(s["chars"])]
+        await q.edit_message_text("NPC", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data.startswith("npc_"):
+        idx = int(q.data.split("_")[1])
+        kb = [
+            [InlineKeyboardButton("✏️ Edit", callback_data=f"edit_npc_{idx}")],
+            [InlineKeyboardButton("🎮 Gunakan", callback_data=f"use_npc_{idx}")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="npc_list")]
+        ]
+        await q.edit_message_text(s["chars"][idx]["name"], reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data.startswith("edit_npc_"):
+        idx = int(q.data.split("_")[2])
+        await save(uid, {"step": "edit_name", "edit_target": idx})
+        await q.message.reply_text("Nama baru NPC?") 
 
         await update.message.reply_text("✅ Update selesai", reply_markup=await menu_utama())
         return
