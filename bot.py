@@ -205,13 +205,13 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("📂 Pilih Slot untuk Muat:", reply_markup=InlineKeyboardMarkup(kb))
 
   # GANTI BAGIAN LOAD LU DENGAN INI (Fix Nama Tokoh Utama)
-    elif q.data.startswith("load_"):
+  elif q.data.startswith("load_"):
         from bson import ObjectId
-        import re # Tambahkan import re di bagian atas file jika belum ada
-        
         data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
         if data:
             new_history = data.get("history", [])
+            
+            # Update state database agar sinkron
             await save(uid, {
                 "history": new_history, 
                 "chars": data.get("chars", []), 
@@ -220,20 +220,30 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "step": None
             })
             
-            # Ambil cuplikan
-            preview = "\n\n".join(new_history[-2:]) if new_history else "Riwayat kosong."
-            
-            # Membersihkan karakter Markdown yang berbahaya agar tidak error parse
-            safe_preview = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', preview)
-            
-            # Gunakan MarkdownV2 agar lebih stabil atau hapus parse_mode jika ragu
-            try:
-                await q.message.reply_text(
-                    f"✅ *Berhasil memuat slot:* {data['save_name']}\n\n"
-                    f"*Cuplikan Terakhir:*\n{preview}", 
-                    parse_mode="Markdown", # Jika masih error, ganti menjadi None
-                    reply_markup=await menu_utama(uid)
-                )
+            # Logika mengambil 1 cerita terakhir yang bersih
+            pesan_tampil = "Riwayat cerita kosong."
+            if new_history:
+                raw_last = new_history[-1]
+                # Menghilangkan tag identitas seperti [NARASI]: atau [Maya]: 
+                # agar yang tampil hanya isi ceritanya saja
+                if "]: " in raw_last:
+                    pesan_tampil = raw_last.split("]: ", 1)[1]
+                else:
+                    pesan_tampil = raw_last
+
+                # Batasi panjang karakter agar tidak kena limit Telegram (4096 char)
+                if len(pesan_tampil) > 3500:
+                    pesan_tampil = pesan_tampil[:3500] + "..."
+
+            # Kirim pesan konfirmasi dan isi cerita terakhir
+            await q.message.reply_text(
+                f"📂 **Slot dimuat:** {data['save_name']}\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"{pesan_tampil}", 
+                # parse_mode dihapus agar aman dari error 'Can't parse entities'
+                reply_markup=await menu_utama(uid)
+            )
+            #==================================================================
             except:
                 # Fallback: Kirim tanpa Markdown jika teks mengandung karakter aneh
                 await q.message.reply_text(
