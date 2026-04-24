@@ -276,7 +276,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text_display = f"Karakter: {name}\n\nInfo: {info}"
         await q.edit_message_text(text_display, reply_markup=InlineKeyboardMarkup(kb))
-   elif q.data.startswith("new_story_"):
+    elif q.data.startswith("new_story_"):
         # Mengambil angka setelah underscore terakhir
         # Contoh: "new_story_-1" -> "-1"
         try:
