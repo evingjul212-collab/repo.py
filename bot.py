@@ -37,26 +37,49 @@ async def get_state(uid):
 async def save(uid, data):
     await users.update_one({"_id": uid}, {"$set": data}, upsert=True)
 
-# ========= [3] AI CORE =========
+# GANTI BAGIAN GENERATE LU DENGAN INI (Lebih detail error-nya)
 async def generate(prompt, system, history, mode="FAST"):
     context = "\n---\n".join(history[-10:]) if history else "Mulai."
     full = f"{system}\n\n{context}\n\n{prompt}"
     model = MODELS.get(mode, MODELS["FAST"])
     try:
         loop = asyncio.get_event_loop()
-        r = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=model, contents=full))
-        return r.text.strip(), model
+        # Tambahkan timeout agar tidak gantung selamanya
+        r = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=model, contents=full)),
+            timeout=30.0 
+        )
+        if r and r.text:
+            return r.text.strip(), model
+        return None, None
     except Exception as e:
-        print(f"Error AI: {e}")
+        # Ini bakal muncul di log terminal lu, jadi lu tahu error aslinya apa
+        print(f"!!! ERROR AI: {str(e)}") 
         return None, None
 
-def build_system(name, desc, role):
-    tag = name if name else "Karakter"
-    description = desc if desc else "Karakter misterius"
-    base = f"Kamu adalah {tag}.\nDeskripsi: {description}\n\nAturan: Dialog dominan, emosional, maks 3 paragraf."
-    if role == "NARATOR":
-        base += "\nFokus pada narasi dan konflik lingkungan."
-    return base
+# GANTI BAGIAN LOAD LU DENGAN INI (Fix Nama Tokoh Utama)
+    elif q.data.startswith("load:"):
+        sid = q.data.split(":")[1]
+        data = await archives.find_one({"_id": ObjectId(sid)})
+        if data:
+            # Kunci utama: Pindahkan semua data mentah dari arsip ke state aktif
+            new_state = {
+                "name": data.get("name", ""), 
+                "desc_utama": data.get("desc_utama", ""),
+                "history": data.get("history", []),
+                "chars": data.get("chars", []),
+                "step": "action",
+                "selected": -1
+            }
+            await save(uid, new_state)
+            
+            nama_tampil = new_state["name"] if new_state["name"] else "Tokoh Utama"
+            msg_tampil = new_state["history"][-1] if new_state["history"] else "Data dimuat."
+            
+            await q.message.reply_text(
+                f"✅ Berhasil Memuat: {nama_tampil}\n\n{msg_tampil}", 
+                reply_markup=await menu_utama()
+            )
 
 # ========= [4] UI MENU =========
 async def menu_utama(): 
