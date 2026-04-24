@@ -14,7 +14,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 MODELS = {
-    "FAST": "gemini-2.0-flash",
+    "FAST": "gemini-2.5-flash",
     "CREATIVE": "gemini-3.1-flash-lite-preview"
 }
 
@@ -230,20 +230,19 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text("Kosong.")
             return
         kb = [[InlineKeyboardButton(f"{i['save_name']}", callback_data=f"load:{i['_id']}")] for i in items]
-        await q.edit_message_text("Pilih Save:", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("Pilih Save Slot:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("load:"):
         sid = q.data.split(":")[1]
         data = await archives.find_one({"_id": ObjectId(sid)})
         if data:
-            # Perbaikan: history dan chars diambil dari data yang di-load
-            await save(uid, {
-                "history": data.get("history", []),
-                "chars": data.get("chars", []),
-                "step": "action",
-                "selected": -1
-            })
-            await q.message.reply_text("Load berhasil!", reply_markup=await menu_utama())
+            history = data.get("history", [])
+            chars = data.get("chars", [])
+            await save(uid, {"history": history, "chars": chars, "step": "action", "selected": -1})
+            
+            # Balik ke logika asli: Tampilkan isi cerita terakhir + menu
+            last_text = history[-1] if history else "Data kosong."
+            await q.message.reply_text(f"✅ Load Berhasil!\n\n{last_text}", reply_markup=await menu_utama())
 
     elif q.data == "save_manual":
         await save(uid, {"step": "save_name"})
