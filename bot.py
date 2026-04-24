@@ -246,13 +246,12 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "\n\n".join(s["history"])
         file_data = io.BytesIO(text.encode()); file_data.name = "story.txt"
         await q.message.reply_document(file_data)
-   elif q.data.startswith("sel_"):
+    elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1])
         # Menentukan identitas karakter berdasarkan index
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         info = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
-        
-        # Simpan index yang dipilih ke state agar sistem tahu siapa yang aktif
+                # Simpan index yang dipilih ke state agar sistem tahu siapa yang aktif
         await save(uid, {"selected": idx})
         
         # Susunan tombol sesuai gambar referensi
