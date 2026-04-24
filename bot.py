@@ -28,7 +28,7 @@ async def get_state(uid):
     s = await users.find_one({"_id": uid}) or {}
     return {
         "_id": uid,
-        "name": s.get("name", "Bayu"),
+        "name": s.get("name"),
         "desc_utama": s.get("desc_utama", "Tokoh utama biasa"),
         "history": s.get("history", []),
         "chars": s.get("chars", []),
@@ -81,6 +81,7 @@ async def menu_utama():
         [InlineKeyboardButton("📂 Muat", callback_data="load_list")],
         [InlineKeyboardButton("⏩ Lanjut", callback_data="lanjut")],
         [InlineKeyboardButton("💾 Simpan", callback_data="save_manual")]
+        [InlineKeyboardButton("🎭 Narator", callback_data="step_narator")]
     ])
 
 # ========= START =========
@@ -154,6 +155,28 @@ Lanjutkan cerita.
             s["history"].append(f"[{name}]: {out}")
             await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(out, reply_markup=await menu_utama())
+
+    # ACTION / NARATOR
+    if s["step"] in ["action", "narator_input"]:
+        is_nar = s["step"] == "narator_input"
+        idx = s.get("selected", -1)
+
+        tag = "NARASI" if is_nar else (s["name"] if idx == -1 else s["chars"][idx]["name"])
+        desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
+
+        system = build_system(tag, desc)
+        prompt = f"KEJADIAN: {text}" if is_nar else f"AKSI: {text}"
+
+        await save(uid, {"last_prompt": prompt, "last_system": system})
+
+        out, _ = await generate(prompt, system, s["history"])
+
+        if out:
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"], "step": None})
+            await safe_send(update, out, tag, await menu_utama(uid))
+        else:
+            await update.message.reply_text("⚠️ AI sibuk.", reply_markup=await menu_utama(uid))
 
 # ========= CALLBACK =========
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -293,6 +316,10 @@ Dialog awal:
 
     elif q.data == "main_menu":
         await q.edit_message_text("Menu:", reply_markup=await menu_utama())
+
+elif q.data == "step_narator":
+        await save(uid, {"step": "narator_input"})
+        await q.message.reply_text("🎭 Kejadian apa?")
 
 # ========= RUN =========
 if __name__ == "__main__":
