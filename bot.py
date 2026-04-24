@@ -14,7 +14,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 MODELS = {
-    "FAST": "gemini-2.5-flash",
+    "FAST": "gemini-2.0-flash",
     "CREATIVE": "gemini-3.1-flash-lite-preview"
 }
 
@@ -88,7 +88,7 @@ async def menu_utama(uid=None):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     await save(uid, {"history": [], "chars": [], "step": None})
-    await update.message.reply_text("🎮 RPG AI Siap v1.3!", reply_markup=await menu_utama())
+    await update.message.reply_text("🎮 RPG AI Siap v1.2!", reply_markup=await menu_utama())
 
 # ========= MESSAGE =========
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -217,7 +217,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sys = build_system("Narator", "Dunia", "NARATOR")
         mode = random.choice(["FAST", "CREATIVE"])
-        prompt = "Lanjutkan cerita dengan kejadian baru yang tak terduga tapi jangan yang tidak masuk akal."
+        prompt = "Lanjutkan cerita dengan konflik atau kejadian baru."
         out, _ = await generate(prompt, sys, s["history"], mode=mode)
         if out:
             s["history"].append(out)
