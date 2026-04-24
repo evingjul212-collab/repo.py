@@ -80,7 +80,7 @@ async def menu_utama():
         [InlineKeyboardButton("👤 Karakter", callback_data="menu_char")],
         [InlineKeyboardButton("📂 Muat", callback_data="load_list")],
         [InlineKeyboardButton("⏩ Lanjut", callback_data="lanjut")],
-        [InlineKeyboardButton("💾 Simpan", callback_data="save_manual")]
+        [InlineKeyboardButton("💾 Simpan", callback_data="save_manual")],
         [InlineKeyboardButton("🎭 Narator", callback_data="step_narator")]
     ])
 
