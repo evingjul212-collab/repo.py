@@ -56,7 +56,7 @@ def build_system(name, desc, role):
     name_tag = name if name else "Karakter"
     base = f"Kamu adalah {name_tag}.\nDeskripsi: {desc}\n\nAturan: Dialog dominan, emosional, maks 3 paragraf."
     if role == "NARATOR":
-        base += "\nFokus narasi & konflik dunia."
+        base += "\nFokus narasi & Roaman komedi."
     return base
 
 # ========= [4] MENU =========
