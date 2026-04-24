@@ -264,7 +264,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text_display = f"Karakter: {name}\n\nInfo: {info}"
         await q.edit_message_text(text_display, reply_markup=InlineKeyboardMarkup(kb))
-elif q.data.startswith("new_story_"):
+    elif q.data.startswith("new_story_"):
         idx = int(q.data.split("_")[1])
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
