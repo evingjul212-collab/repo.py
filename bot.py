@@ -243,7 +243,6 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # parse_mode dihapus agar aman dari error 'Can't parse entities'
                 reply_markup=await menu_utama(uid)
             )
-            #==================================================================
             except:
                 # Fallback: Kirim tanpa Markdown jika teks mengandung karakter aneh
             await q.message.reply_text(
