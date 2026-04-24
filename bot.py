@@ -114,10 +114,19 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # -- SIMPAN GAME --
-    if s["step"] == "save_name":
-        await archives.insert_one({"user_id": uid, "save_name": text, "history": s["history"], "chars": s["chars"], "name": s["name"], "desc_utama": s["desc_utama"], "date": datetime.now()})
+   if s["step"] == "save_name":
+        # Pastikan s["name"] dan s["desc_utama"] ikut masuk ke dalam dictionary insert_one
+        await archives.insert_one({
+            "user_id": uid,
+            "save_name": text,     # Nama slot save dari input user
+            "name": s["name"],     # Nama Tokoh Utama saat ini
+            "desc_utama": s["desc_utama"],
+            "history": s["history"],
+            "chars": s["chars"],
+            "date": datetime.now()
+        })
         await save(uid, {"step": None})
-        await update.message.reply_text("💾 Tersimpan!", reply_markup=await menu_utama())
+        await update.message.reply_text(f"💾 Slot '{text}' tersimpan!", reply_markup=await menu_utama())
         return
 
     # -- LOGIKA AKSI & LANJUT --
@@ -220,11 +229,30 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("load:"):
-        sid = q.data.split(":")[1]; data = await archives.find_one({"_id": ObjectId(sid)})
+        sid = q.data.split(":")[1]
+        # 1. Ambil data dari arsip/save slot
+        data = await archives.find_one({"_id": ObjectId(sid)})
+        
         if data:
-            await save(uid, {"history": data["history"], "chars": data["chars"], "name": data.get("name", ""), "desc_utama": data.get("desc_utama", ""), "step": "action", "selected": -1})
-            await q.message.reply_text(f"✅ Dimuat: {data.get('name', 'Tanpa Nama')}\n\n{data['history'][-1] if data['history'] else 'Kosong'}", reply_markup=await menu_utama())
-
+            # 2. PINDAHKAN SEMUA ke user_states (State Aktif)
+            # Pastikan "name" dan "desc_utama" ikut di-save di sini
+            await save(uid, {
+                "name": data.get("name", ""), 
+                "desc_utama": data.get("desc_utama", ""),
+                "history": data.get("history", []),
+                "chars": data.get("chars", []),
+                "step": "action", # Langsung set ke mode aksi
+                "selected": -1    # Default ke Tokoh Utama
+            })
+            
+            # 3. Tampilkan pesan sukses dengan nama yang baru dimuat
+            nama_muat = data.get("name") if data.get("name") else "Tokoh Utama"
+            last_msg = data["history"][-1] if data.get("history") else "Data dimuat."
+            
+            await q.message.reply_text(
+                f"✅ Berhasil Memuat: {nama_muat}\n\n{last_msg}", 
+                reply_markup=await menu_utama()
+            )
     elif q.data == "save_manual": await save(uid, {"step": "save_name"}); await q.message.reply_text("Nama save?")
     elif q.data == "main_menu": await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama())
     elif q.data == "step_narator": await save(uid, {"step": "narator_input"}); await q.message.reply_text("🎭 Kejadian apa?")
