@@ -205,27 +205,28 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("📂 Pilih Slot untuk Muat:", reply_markup=InlineKeyboardMarkup(kb))
 
   # GANTI BAGIAN LOAD LU DENGAN INI (Fix Nama Tokoh Utama)
-    elif q.data.startswith("load:"):
-        sid = q.data.split(":")[1]
-        data = await archives.find_one({"_id": ObjectId(sid)})
+    elif q.data.startswith("load_"):
+        from bson import ObjectId
+        data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
         if data:
-            # Kunci utama: Pindahkan semua data mentah dari arsip ke state aktif
-            new_state = {
-                "name": data.get("name", ""), 
-                "desc_utama": data.get("desc_utama", ""),
-                "history": data.get("history", []),
-                "chars": data.get("chars", []),
-                "step": "action",
-                "selected": -1
-            }
-            await save(uid, new_state)
+            # Update state lokal dengan data dari database
+            new_history = data.get("history", [])
+            await save(uid, {
+                "history": new_history, 
+                "chars": data.get("chars", []), 
+                "name": data.get("name", s["name"]),
+                "desc_utama": data.get("desc_utama", s["desc_utama"]),
+                "step": None # Reset step agar tidak nyangkut di input nama save
+            })
             
-            nama_tampil = new_state["name"] if new_state["name"] else "Tokoh Utama"
-            msg_tampil = new_state["history"][-1] if new_state["history"] else "Data dimuat."
+            # Ambil 2 pesan terakhir untuk ditampilkan sebagai preview
+            preview = "\n\n".join(new_history[-2:]) if new_history else "Riwayat kosong."
             
             await q.message.reply_text(
-                f"✅ Berhasil Memuat: {nama_tampil}\n\n{msg_tampil}", 
-                reply_markup=await menu_utama()
+                f"✅ **Berhasil memuat slot:** {data['save_name']}\n\n"
+                f"**Cuplikan Terakhir:**\n{preview}", 
+                parse_mode="Markdown",
+                reply_markup=await menu_utama(uid)
             )
     elif q.data == "reset_confirm":
         await save(uid, {"history": [], "chars": [], "step": None, "name": None})
