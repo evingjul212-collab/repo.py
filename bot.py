@@ -205,7 +205,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("📂 Pilih Slot untuk Muat:", reply_markup=InlineKeyboardMarkup(kb))
 
   # GANTI BAGIAN LOAD LU DENGAN INI (Fix Nama Tokoh Utama)
-      elif q.data.startswith("load_"):
+    elif q.data.startswith("load_"):
         from bson import ObjectId
         data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
         if data:
@@ -246,7 +246,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             #==================================================================
             except:
                 # Fallback: Kirim tanpa Markdown jika teks mengandung karakter aneh
-                await q.message.reply_text(
+            await q.message.reply_text(
                     f"✅ Berhasil memuat slot: {data['save_name']}\n\n"
                     f"Cuplikan Terakhir:\n{preview}", 
                     reply_markup=await menu_utama(uid)
