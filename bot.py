@@ -207,27 +207,40 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
   # GANTI BAGIAN LOAD LU DENGAN INI (Fix Nama Tokoh Utama)
     elif q.data.startswith("load_"):
         from bson import ObjectId
+        import re # Tambahkan import re di bagian atas file jika belum ada
+        
         data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
         if data:
-            # Update state lokal dengan data dari database
             new_history = data.get("history", [])
             await save(uid, {
                 "history": new_history, 
                 "chars": data.get("chars", []), 
                 "name": data.get("name", s["name"]),
                 "desc_utama": data.get("desc_utama", s["desc_utama"]),
-                "step": None # Reset step agar tidak nyangkut di input nama save
+                "step": None
             })
             
-            # Ambil 2 pesan terakhir untuk ditampilkan sebagai preview
+            # Ambil cuplikan
             preview = "\n\n".join(new_history[-2:]) if new_history else "Riwayat kosong."
             
-            await q.message.reply_text(
-                f"✅ **Berhasil memuat slot:** {data['save_name']}\n\n"
-                f"**Cuplikan Terakhir:**\n{preview}", 
-                parse_mode="Markdown",
-                reply_markup=await menu_utama(uid)
-            )
+            # Membersihkan karakter Markdown yang berbahaya agar tidak error parse
+            safe_preview = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', preview)
+            
+            # Gunakan MarkdownV2 agar lebih stabil atau hapus parse_mode jika ragu
+            try:
+                await q.message.reply_text(
+                    f"✅ *Berhasil memuat slot:* {data['save_name']}\n\n"
+                    f"*Cuplikan Terakhir:*\n{preview}", 
+                    parse_mode="Markdown", # Jika masih error, ganti menjadi None
+                    reply_markup=await menu_utama(uid)
+                )
+            except:
+                # Fallback: Kirim tanpa Markdown jika teks mengandung karakter aneh
+                await q.message.reply_text(
+                    f"✅ Berhasil memuat slot: {data['save_name']}\n\n"
+                    f"Cuplikan Terakhir:\n{preview}", 
+                    reply_markup=await menu_utama(uid)
+                )
     elif q.data == "reset_confirm":
         await save(uid, {"history": [], "chars": [], "step": None, "name": None})
         await q.message.reply_text("🧹 Sesi dihapus total. Gunakan /start untuk baru.")
