@@ -95,13 +95,44 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
     s = await get_state(uid)
+# EDIT DESKRIPSI TOKOH UTAMA
+    if s["step"] == "edit_main_desc":
+        await save(uid, {"desc_utama": text, "step": None})
+        await update.message.reply_text("✅ Deskripsi Tokoh Utama diperbarui!", reply_markup=await menu_utama())
+        return
+        # EDIT DESKRIPSI NPC
     if s["step"] == "edit_char_desc":
         idx = s["selected"]
         chars = s["chars"]
-        chars[idx]["desc"] = text # Timpa deskripsi lama
+        chars[idx]["desc"] = text
         await save(uid, {"chars": chars, "step": None})
-        await update.message.reply_text(f"✅ Deskripsi {chars[idx]['name']} berhasil diupdate!", reply_markup=await menu_utama())
+        await update.message.reply_text(f"✅ Deskripsi {chars[idx]['name']} diperbarui!", reply_markup=await menu_utama())
         return
+        # LOGIKA AKSI (GABUNGAN AGAR TIDAK BENTROK)
+    if s["step"] in ["action", "narator_input"]:
+        is_nar = s["step"] == "narator_input"
+        idx = s.get("selected", -1)
+        
+        # Penentuan Tag dan Desc sesuai yang dipilih (Fix Prompt melantur)
+        if is_nar:
+            tag, desc = "NARASI", "Dunia"
+        elif idx == -1:
+            tag, desc = s.get("name", "Tokoh Utama"), s.get("desc_utama", "")
+        else:
+            tag, desc = s["chars"][idx]["name"], s["chars"][idx]["desc"]
+
+        system = build_system(tag, desc, "NARATOR" if is_nar else "CHAR")
+        prompt = f"KEJADIAN: {text}" if is_nar else f"AKSI: {text}"
+
+        out, _ = await generate(prompt, system, s["history"])
+        if out:
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"], "step": None})
+            await update.message.reply_text(out, reply_markup=await menu_utama())
+        else:
+            await update.message.reply_text("⚠️ AI sibuk atau limit tercapai.")
+        return # Pastikan ada return agar tidak eksekusi bawahnya lagi
+        #========================================================================
     if s["step"] == "char_name":
         await save(uid, {"temp_char": {"name": text}, "step": "char_desc"})
         await update.message.reply_text("Deskripsi NPC?")
@@ -205,10 +236,38 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Di sini AI nampilin deskripsi biar user bisa baca dulu sebelum milih opsi
         await q.edit_message_text(f"Karakter: {npc['name']}\n\nInfo: {npc['desc']}", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif q.data == "use_main":
-        # Langsung set ke mode aksi untuk Tokoh Utama
+elif q.data == "use_main":
+        # Menampilkan menu yang sama dengan NPC untuk Tokoh Utama
+        kb = [
+            [InlineKeyboardButton("🎮 Aksi (Lanjut)", callback_data="main_action")],
+            [InlineKeyboardButton("📖 New Story", callback_data="main_new_story")],
+            [InlineKeyboardButton("📝 Edit Deskripsi", callback_data="main_edit")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="menu_char")]
+        ]
+        # Mengambil deskripsi tokoh utama dari state
+        desc_tu = s.get("desc_utama", "Tokoh utama")
+        await q.edit_message_text(f"Tokoh Utama: {s.get('name', 'User')}\n\nInfo: {desc_tu}", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data == "main_action":
         await save(uid, {"selected": -1, "step": "action"})
-        await q.message.reply_text(f"Gunakan {s.get('name', 'Tokoh Utama')}. Ketik aksi kamu:")
+        await q.message.reply_text("Ketik aksi Tokoh Utama:")
+
+    elif q.data == "main_edit":
+        await save(uid, {"selected": -1, "step": "edit_main_desc"})
+        await q.message.reply_text("Ketik deskripsi baru untuk Tokoh Utama:")
+
+    elif q.data == "main_new_story":
+        # New Story khusus Tokoh Utama
+        name_tu = s.get("name", "Tokoh Utama")
+        desc_tu = s.get("desc_utama", "Tokoh utama")
+        sys = build_system("Narator", desc_tu, "NARATOR")
+        prompt = f"Buat cerita awal berdasarkan deskripsi Tokoh Utama ini. Nama: {name_tu}, Deskripsi: {desc_tu}. Jangan melantur ke tempat lain."
+        
+        await q.message.reply_text("🪄 Membuat cerita baru Tokoh Utama...")
+        out, _ = await generate(prompt, sys, [], mode="CREATIVE")
+        if out:
+            await save(uid, {"history": [out], "selected": -1, "step": "action"})
+            await q.message.reply_text(out, reply_markup=await menu_utama())
 
     elif q.data.startswith("use_npc_"):
         idx = int(q.data.split("_")[2])
