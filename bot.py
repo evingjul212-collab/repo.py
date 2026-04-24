@@ -246,10 +246,56 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "\n\n".join(s["history"])
         file_data = io.BytesIO(text.encode()); file_data.name = "story.txt"
         await q.message.reply_document(file_data)
-    elif q.data.startswith("sel_"):
-        idx = int(q.data.split("_")[1]); name = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        kb = [[InlineKeyboardButton("💬 Aksi", callback_data=f"act_{idx}")],[InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")],[InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]]
-        await q.edit_message_text(f"Karakter: {name}", reply_markup=InlineKeyboardMarkup(kb))
+   elif q.data.startswith("sel_"):
+        idx = int(q.data.split("_")[1])
+        # Menentukan identitas karakter berdasarkan index
+        name = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        info = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
+        
+        # Simpan index yang dipilih ke state agar sistem tahu siapa yang aktif
+        await save(uid, {"selected": idx})
+        
+        # Susunan tombol sesuai gambar referensi
+        kb = [
+            [InlineKeyboardButton("🎮 Aksi (Lanjut)", callback_data=f"act_{idx}")],
+            [InlineKeyboardButton("📖 New Story", callback_data=f"new_story_{idx}")],
+            [InlineKeyboardButton("📝 Edit Deskripsi", callback_data=f"edit_{idx}")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]
+        ]
+        
+        text_display = f"Karakter: {name}\n\nInfo: {info}"
+        await q.edit_message_text(text_display, reply_markup=InlineKeyboardMarkup(kb))
+elif q.data.startswith("new_story_"):
+        idx = int(q.data.split("_")[1])
+        name = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
+        
+        # Membersihkan riwayat untuk memulai alur baru
+        s["history"] = []
+        system_prompt = build_system(name, desc)
+        
+        # Prompt otomatis mengambil dari deskripsi karakter
+        starting_prompt = f"Buat adegan pembuka yang dramatis untuk {name} berdasarkan deskripsi ini: {desc}"
+        
+        await q.message.reply_text(f"🎬 Menyiapkan cerita baru untuk {name}...")
+        
+        # Generate konten pertama
+        out, model_used = await generate(starting_prompt, system_prompt, s["history"])
+        
+        if out:
+            s["history"].append(f"[{name}]: {out}")
+            # Simpan semua status terbaru termasuk prompt terakhir untuk fitur Regen
+            await save(uid, {
+                "history": s["history"], 
+                "selected": idx, 
+                "last_prompt": starting_prompt, 
+                "last_system": system_prompt,
+                "step": None
+            })
+            await safe_send(q, out, name, await menu_utama(uid))
+        else:
+            await q.message.reply_text("⚠️ Gagal memulai cerita. Coba klik 🔄 Regen.", reply_markup=await menu_utama(uid))
+
     elif q.data.startswith("act_"):
         idx = int(q.data.split("_")[1]); name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         await save(uid, {"selected": idx, "step": "action"}); await q.message.reply_text(f"Aksi {name}?")
