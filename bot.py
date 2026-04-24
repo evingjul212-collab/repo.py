@@ -204,18 +204,29 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
         await q.edit_message_text("📂 Pilih Slot untuk Muat:", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif q.data.startswith("load_"):
-        from bson import ObjectId
-        data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
+  # GANTI BAGIAN LOAD LU DENGAN INI (Fix Nama Tokoh Utama)
+    elif q.data.startswith("load:"):
+        sid = q.data.split(":")[1]
+        data = await archives.find_one({"_id": ObjectId(sid)})
         if data:
-            await save(uid, {
-                "history": data["history"], 
-                "chars": data["chars"], 
-                "name": data.get("name", s["name"]),
-                "desc_utama": data.get("desc_utama", s["desc_utama"])
-            })
-            await q.message.reply_text(f"✅ Memuat: {data['save_name']}", reply_markup=await menu_utama(uid))
-
+            # Kunci utama: Pindahkan semua data mentah dari arsip ke state aktif
+            new_state = {
+                "name": data.get("name", ""), 
+                "desc_utama": data.get("desc_utama", ""),
+                "history": data.get("history", []),
+                "chars": data.get("chars", []),
+                "step": "action",
+                "selected": -1
+            }
+            await save(uid, new_state)
+            
+            nama_tampil = new_state["name"] if new_state["name"] else "Tokoh Utama"
+            msg_tampil = new_state["history"][-1] if new_state["history"] else "Data dimuat."
+            
+            await q.message.reply_text(
+                f"✅ Berhasil Memuat: {nama_tampil}\n\n{msg_tampil}", 
+                reply_markup=await menu_utama()
+            )
     elif q.data == "reset_confirm":
         await save(uid, {"history": [], "chars": [], "step": None, "name": None})
         await q.message.reply_text("🧹 Sesi dihapus total. Gunakan /start untuk baru.")
