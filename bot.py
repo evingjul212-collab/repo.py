@@ -114,72 +114,47 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     s = await get_state(uid)
 
+    # 1. SET NAMA AWAL (START/RESET)
     if s["step"] == "set_name":
         await save(uid, {"name": text, "step": None})
         await update.message.reply_text(f"🔥 Selamat datang, {text}!", reply_markup=await menu_utama(uid))
         return
-# --- LOGIKA EDIT BERUNTUN ---
-    
-    # Tahap 1: Tangkap Nama, lalu minta Deskripsi
-    elif s["step"] and s["step"].startswith("editdesc_"):
+
+    # 2. TAHAP TANGKAP NAMA (EDIT)
+    # Catatan: Callback edit_ Boss mengeset step ke 'editname_{idx}'
+    if s["step"] and s["step"].startswith("editname_"):
         idx = int(s["step"].split("_")[1])
-        new_name = s.get("temp_char") # Ini menangkap nama 'Maya' yang Boss input sebelumnya
-        new_desc = text # Ini deskripsi yang baru Boss input
+        # Simpan nama baru ke temp_char, pindah step ke input deskripsi
+        await save(uid, {"temp_char": text, "step": f"editdesc_final_{idx}"})
+        await update.message.reply_text(f"✅ Nama disimpan: **{text}**\n\nSekarang, masukkan **DESKRIPSI** barunya:")
+        return
+
+    # 3. TAHAP TANGKAP DESKRIPSI (FINAL SIMPAN)
+    if s["step"] and s["step"].startswith("editdesc_final_"):
+        idx = int(s["step"].split("_")[2])
+        new_name = s.get("temp_char") # Nama 'eko' atau 'martha' dari Tahap 2
         
-        if idx == -1: 
-            # LOGIKA SIMPAN TOKOH UTAMA
+        if idx == -1: # Update Tokoh Utama
             await save(uid, {
-                "name": new_name,        # Simpan nama baru ke field 'name'
-                "desc_utama": new_desc,  # Simpan deskripsi baru
+                "name": new_name, 
+                "desc_utama": text, 
                 "step": None, 
                 "temp_char": None
             })
-        else: 
-            # LOGIKA SIMPAN NPC
+        else: # Update NPC
             s["chars"][idx]["name"] = new_name
-            s["chars"][idx]["desc"] = new_desc
+            s["chars"][idx]["desc"] = text
             await save(uid, {"chars": s["chars"], "step": None, "temp_char": None})
             
         await update.message.reply_text(f"✨ Karakter {new_name} berhasil diperbarui!", reply_markup=await menu_utama(uid))
         return
 
-    # Tahap 2: Tangkap Deskripsi, lalu simpan permanen
-    elif s["step"] and s["step"].startswith("editdesc_"):
-        idx = int(s["step"].split("_")[1])
-        new_name = s.get("temp_name")
-        new_desc = text
-        
-        if idx == -1: # Jika yang diedit Tokoh Utama
-            await save(uid, {
-                "name": new_name, 
-                "desc_utama": new_desc, 
-                "step": None, 
-                "temp_name": None # hapus temp
-            })
-        else: # Jika yang diedit NPC
-            s["chars"][idx]["name"] = new_name
-            s["chars"][idx]["desc"] = new_desc
-            await save(uid, {
-                "chars": s["chars"], 
-                "step": None, 
-                "temp_name": None # hapus temp
-            })
-            
-        await update.message.reply_text("✨ Sip! Nama dan Deskripsi berhasil diperbarui.", reply_markup=await menu_utama(uid))
-        return
-    # LOGIKA SAVE MANUAL
+    # 4. LOGIKA LAINNYA (SAVE, IMPORT, ACTION)
     if s["step"] == "save_name_input":
-        save_data = {
-            "user_id": uid,
-            "save_name": text,
-            "name": s["name"],
-            "history": s["history"],
-            "chars": s["chars"],
-            "desc_utama": s["desc_utama"]
-        }
+        save_data = {"user_id": uid, "save_name": text, "name": s["name"], "history": s["history"], "chars": s["chars"], "desc_utama": s["desc_utama"]}
         await archives.insert_one(save_data)
         await save(uid, {"step": None})
-        await update.message.reply_text(f"✅ Cerita berhasil disimpan ke slot: {text}", reply_markup=await menu_utama(uid))
+        await update.message.reply_text(f"✅ Tersimpan di slot: {text}", reply_markup=await menu_utama(uid))
         return
 
     if s["step"] == "import_chars":
@@ -190,31 +165,6 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 s["chars"].append({"name": c_name.strip(), "desc": c_desc.strip()})
         await save(uid, {"chars": s["chars"], "step": None})
         await update.message.reply_text(f"✅ Karakter ditambahkan!", reply_markup=await menu_utama(uid))
-        return
-
-  # === LOGIKA EDIT NAMA & DESKRIPSI (VERSI TERBARU) ===
-    
-    # Tahap 1: Setelah Boss input Nama Baru
-    if s["step"] and s["step"].startswith("updating_"):
-        idx = int(s["step"].split("_")[1])
-        # Simpan nama ke gudang sementara (temp_char) dan pindah ke step deskripsi
-        await save(uid, {"temp_char": text, "step": f"descr_updating_{idx}"})
-        await update.message.reply_text(f"✅ Nama disimpan: **{text}**\n\nSekarang, masukkan **DESKRIPSI** barunya:")
-        return
-
-    # Tahap 2: Setelah Boss input Deskripsi Baru
-    if s["step"] and s["step"].startswith("descr_updating_"):
-        idx = int(s["step"].split("_")[2])
-        new_name = s.get("temp_char") # Nama yang tadi diinput
-        
-        if idx == -1: # Update Tokoh Utama
-            await save(uid, {"name": new_name, "desc_utama": text, "step": None, "temp_char": None})
-        else: # Update NPC
-            s["chars"][idx]["name"] = new_name
-            s["chars"][idx]["desc"] = text
-            await save(uid, {"chars": s["chars"], "step": None, "temp_char": None})
-            
-        await update.message.reply_text(f"✨ Karakter {new_name} berhasil diperbarui!", reply_markup=await menu_utama(uid))
         return
 
     if s["step"] == "char_name":
@@ -228,6 +178,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ NPC ditambahkan.", reply_markup=await menu_utama(uid))
         return
 
+    # 5. GAMEPLAY ACTION / NARATOR
     if s["step"] in ["action", "narator_input"]:
         is_nar = s["step"] == "narator_input"
         idx = s.get("selected", -1)
@@ -243,7 +194,6 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_send(update, out, tag, await menu_utama(uid))
         else:
             await update.message.reply_text("⚠️ AI sibuk.", reply_markup=await menu_utama(uid))
-
 # ========= CALLBACK =========
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
