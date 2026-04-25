@@ -40,10 +40,15 @@ async def save(uid, data):
 
 # --- ENGINE AI ---
 async def generate_response(prompt, history, force_options=False):
-    system = "Penulis RomCom RPG. Fokus interaksi manis."
+    system = ("Penulis RomCom RPG. Fokus interaksi manis."
+             "Kamu adalah Penulis Novel Visual RomCom yang ahli dalam dialog interaktif. "
+                 "TUGAS: Tulis cerita minimal 1000 karakter. "
+                 "GAYA: Perbanyak dialog antar karakter (Gunakan tanda kutip), buat emosional dan sedikit nakal/lucu. "
+                 "NARASI: Gunakan narasi hanya untuk aksi fisik atau suasana singkat. "
+                  "KARAKTER: Gunakan bahasa gaul/natural.")
     if force_options:
         system += " WAJIB akhiri narasi dengan 4 pilihan aksi: A, B, C, D."
-    
+                
     context = "[KONTEKS]\n" + "\n".join(history[-3:]) if history else ""
     full_prompt = f"{system}\n\n{context}\n\n[INPUT]\n{prompt}"
 
@@ -114,7 +119,7 @@ async def callback(update, context):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
 
     if q.data == "lanjut":
-        out = await generate_response("Lanjutkan alur.", s["history"], True)
+        out = await generate_response("Lanjutkan alur sekitar 1000 karakter.", s["history"], True)
         if out:
             s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
             await q.message.reply_text(f"--- NEXT ---\n\n{out}", reply_markup=await menu_utama(uid))
@@ -165,7 +170,7 @@ async def callback(update, context):
             await save(uid, {
                 "history": history,
                 "chars": data.get("chars", []),
-                "name": data.get("name", "User"),
+                "name": data.get("name"),
                 "step": None
             })
             
