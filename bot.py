@@ -219,6 +219,34 @@ async def callback(update, context):
             await save(uid, s_new)
             await q.message.reply_text("✅ LOAD SUCCESS!")
             await tampilkan_dua_blok(uid, context, s_new)
+    #=====================================================        
+    elif q.data == "new_start":
+        idx = s.get("selected", -1)
+        name = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        desc = s.get("desc_utama") if idx == -1 else s["chars"][idx].get("desc")
+        
+        loading_msg = await q.message.reply_text(f"🎬 Memulai cerita baru dengan {name}...")
+        
+        # Prompt awal yang menggunakan deskripsi karakter agar AI gak ngawur
+        prompt_awal = (
+            f"Mulai sebuah cerita RomCom baru. Fokus pada pertemuan atau interaksi pertama dengan {name}. "
+            f"Deskripsi karakter {name}: {desc}. "
+            "Tulis sekitar 1000 karakter dengan dialog yang intens."
+        )
+        
+        # Kita kirim history KOSONG [] karena ini cerita baru
+        out = await generate_response(prompt_awal, [], True)
+        
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            # Simpan sebagai riwayat pertama di database (menghapus riwayat lama)
+            new_history = [f"[STORY]:\n{out}"]
+            await save(uid, {"history": new_history})
+            
+            # Tampilkan hasilnya
+            await tampilkan_blok_terbaru(uid, context, {"history": new_history})        
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo" and s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Back.")
     elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
