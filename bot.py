@@ -160,13 +160,24 @@ async def callback(update, context):
     elif q.data.startswith("load_"):
         data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
         if data:
+            history = data.get("history", [])
+            # Sinkronisasi data ke state aktif
             await save(uid, {
-                "history": data.get("history", []),
+                "history": history,
                 "chars": data.get("chars", []),
                 "name": data.get("name", "User"),
                 "step": None
             })
-            await q.message.reply_text("✅ LOADED! Data berhasil dipulihkan.", reply_markup=await menu_utama(uid))
+            
+            # --- LOGIKA TAMPILKAN 1 BLOK CERITA ---
+            if history:
+                pesan_terakhir = history[-1] # Ambil baris paling akhir di history
+                teks_tampilan = f"✅ **GAME LOADED**\n\nRiwayat Terakhir:\n{pesan_terakhir}"
+            else:
+                teks_tampilan = "✅ **GAME LOADED**\n\n(Belum ada riwayat cerita di slot ini)"
+
+            # Kirim pesan cerita terakhir + Menu Utama
+            await q.message.reply_text(teks_tampilan, reply_markup=await menu_utama(uid))
 
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo" and s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Back.")
