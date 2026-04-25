@@ -50,31 +50,32 @@ async def tampilkan_blok_terbaru(uid, context, s):
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 #=================================
 # --- ENGINE AI --- generator
-elif q.data == "new_start":
-        idx = s.get("selected", -1)
-        # Karakter target yang dipilih Boss
-        target_name = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        
-        loading_msg = await q.message.reply_text("🎬 Menyiapkan suasana...")
-        
-        prompt_awal = (
-            f"Mulai cerita baru. Awali dengan narasi suasana lokasi dan waktu. "
-            f"Fokus interaksi antara {s['name']} dengan {target_name}. "
-            f"Cari NPC lain dari daftar yang relevan dengan situasi ini (misal pembantu jika di rumah)."
-        )
-        
-        # GENERATE CUKUP 1 KALI SAJA DISINI
-        out = await generate_response(prompt_awal, [], s, True)
-        
-        if out:
-            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            except: pass
-            
-            # SIMPAN CUKUP 1 KALI
-            new_h = [f"[STORY]:\n{out}"]
-            await save(uid, {"history": new_h})
-            await tampilkan_blok_terbaru(uid, context, {"history": new_h})
+    async def generate_response(prompt, history, s, force_options=False):
+    # Gabungkan data semua NPC agar AI tahu siapa saja yang ada di dunia ini
+    daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
+    
+    system = (
+        f"Kamu adalah Penulis Novel Visual RomCom.\n"
+        f"TOKOH UTAMA: {s['name']} ({s.get('desc_utama', '')})\n"
+        f"DAFTAR NPC YANG TERSEDIA:\n{daftar_npc}\n\n"
+        "TUGAS: Tulis cerita ±1000 karakter. Gunakan NPC yang relevan dari daftar di atas. "
+        "Jika setting di rumah, gunakan NPC yang bekerja di rumah (seperti pembantu). "
+        "GAYA: Dialog dominan, narasi suasana di awal. Bahasa gaul natural."
+    )
+    
+    if force_options:
+        system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
+    
+    context = "[RIWAYAT CERITA SEBELUMNYA]\n" + "\n".join(history[-3:]) if history else "Cerita baru dimulai."
+    full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
 
+    for m in MODELS:
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
+            return resp.text.strip()
+        except: continue
+    return None
 # --- MENU UTAMA ---
 async def menu_utama(uid):
     kb = [
