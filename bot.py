@@ -189,6 +189,20 @@ async def start(update: Update, context):
     uid = update.effective_user.id
     await save(uid, {"step": "set_name", "history": [], "chars": []}) 
     await update.message.reply_text("Siapa namamu?")
+#==========================
+# funsi tetap tampilkan cerita
+async def tampilkan_dua_blok(uid, context, s):
+    history = s.get("history", [])
+    if len(history) >= 2:
+        # Ambil 2 terakhir
+        teks = f"{history[-2]}\n\n{history[-1]}"
+    elif len(history) == 1:
+        teks = history[-1]
+    else:
+        teks = "📖 Belum ada cerita. Mulailah petualanganmu!"
+    
+    # Kirim sebagai PESAN BARU (bukan edit) agar tidak hilang
+    await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
 # --- BAGIAN RUNNING ---
 if __name__ == "__main__":
