@@ -144,8 +144,7 @@ async def callback(update, context):
         for i, c in enumerate(s["chars"]): 
             kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
         kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
-        await q.edit_message_text("Daftar Karakter:", reply_markup=InlineKeyboardMarkup(kb))
-
+        await q.message.reply_text("📋 **Daftar Karakter:**", reply_markup=InlineKeyboardMarkup(kb))
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1]); await save(uid, {"selected": idx})
         kb = [[InlineKeyboardButton("🎮 Aksi", callback_data="act_run")],
@@ -175,9 +174,10 @@ async def callback(update, context):
 
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo" and s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Back.")
-    elif q.data == "main_menu": await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama(uid))
     elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
-
+    elif q.data == "main_menu":
+        # Pastikan menu utama muncul sebagai pesan baru
+        await q.message.reply_text("📱 **Menu Utama:**", reply_markup=await menu_utama(uid))
 # --- START ---
 async def start(update: Update, context):
     uid = update.effective_user.id
