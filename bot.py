@@ -120,18 +120,13 @@ async def callback(update, context):
             await q.message.reply_text(f"--- NEXT ---\n\n{out}", reply_markup=await menu_utama(uid))
 
     elif q.data == "list_all":
-    # Baris 1: Membaca Karakter Utama (index -1)
-    kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
-    
-    # Baris 2-dst: Melakukan looping untuk membaca semua NPC yang tersimpan
-    for i, c in enumerate(s["chars"]): 
-        kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
-    
-    kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), 
-               InlineKeyboardButton("⬅️ Menu Utama", callback_data="main_menu")])
-    await q.edit_message_text("Daftar Karakter Terdeteksi:", reply_markup=InlineKeyboardMarkup(kb))
+        kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
+        for i, c in enumerate(s["chars"]): 
+            kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
+        kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), 
+                   InlineKeyboardButton("⬅️ Menu Utama", callback_data="main_menu")])
+        await q.edit_message_text("Daftar Karakter Terdeteksi:", reply_markup=InlineKeyboardMarkup(kb))
 
-    # KEMBALIKAN BLOK YANG HILANG DI SINI
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1]); await save(uid, {"selected": idx})
         kb = [[InlineKeyboardButton("🎮 Aksi", callback_data="act_run")],
@@ -163,40 +158,34 @@ async def callback(update, context):
         await q.edit_message_text("Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("load_"):
-    # Mencari data di koleksi archives berdasarkan ID
-    data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
-    if data:
-        # Sinkronisasi data: Memasukkan kembali history, chars, dan name
-        await save(uid, {
-            "history": data.get("history", []),
-            "chars": data.get("chars", []), # Memastikan NPC terbaca
-            "name": data.get("name", "User"),
-            "step": None # Reset step agar tidak tersangkut di input lama
-        })
-        await q.message.reply_text("✅ LOADED! Data berhasil dipulihkan.", reply_markup=await menu_utama(uid))
+        data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
+        if data:
+            await save(uid, {
+                "history": data.get("history", []),
+                "chars": data.get("chars", []),
+                "name": data.get("name", "User"),
+                "step": None
+            })
+            await q.message.reply_text("✅ LOADED! Data berhasil dipulihkan.", reply_markup=await menu_utama(uid))
 
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo" and s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Back.")
     elif q.data == "main_menu": await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama(uid))
     elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
 
-# --- FUNGSI START YANG BENAR ---
+# --- FUNGSI START ---
 async def start(update: Update, context):
     uid = update.effective_user.id
-    # Memastikan save ditunggu (await) agar step terkunci
     await save(uid, {"step": "set_name", "history": [], "chars": []}) 
     await update.message.reply_text("Siapa namamu?")
 
 # --- BAGIAN RUNNING ---
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
-    
-    # Jangan pakai lambda yang rumit, pakai fungsi start di atas
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
     
-    # Hapus webhook lama agar tidak bentrok
     loop = asyncio.get_event_loop()
     loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
     
