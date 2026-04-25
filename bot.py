@@ -158,7 +158,7 @@ if __name__ == "__main__":
     async def clean_start():
         bot = app.bot
         await bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Webhook Berhasil Dibersihkan. Siap jalan!")
+        print("✅ Webhook Berhasil Dibersihkan. Siap jalan! ini boss")
 
     asyncio.get_event_loop().run_until_complete(clean_start())
     app.run_polling(drop_pending_updates=True)
