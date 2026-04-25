@@ -233,3 +233,15 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
     print("🔥 RPG BOT FIXED - HISTORY & LOAD READY!")
     app.run_polling(drop_pending_updates=True)
+    # Bagian bawah kodingan Boss
+    async def cleanup():
+        # Pastikan koneksi lama diputus total oleh server Telegram
+        await app.initialize()
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Koneksi lama dibersihkan!")
+
+    # Jalankan pembersihan sebelum polling
+    asyncio.get_event_loop().run_until_complete(cleanup())
+    
+    print("🔥 RPG BOT READY - TANCAP GAS!")
+    app.run_polling(drop_pending_updates=True)
