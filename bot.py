@@ -119,9 +119,22 @@ async def msg(update, context):
         await update.message.reply_text("✨ Karakter diperbarui!", reply_markup=await menu_utama(uid)); return
 
     if s["step"] == "save_manual_step":
-        await archives.insert_one({"user_id": uid, "save_name": text, "history": s["history"], "chars": s["chars"], "name": s["name"]})
+        # Ambil semua data penting agar saat di-load kembali ke kondisi semula
+        save_data = {
+            "user_id": uid,
+            "save_name": text,
+            "history": s["history"],
+            "chars": s["chars"],
+            "name": s["name"],
+            "desc_utama": s.get("desc_utama", "Tokoh Utama") # Tambahkan ini agar deskripsi tidak hilang
+        }
+        # WAJIB pakai await agar data benar-benar masuk sebelum diproses lanjut
+        await archives.insert_one(save_data)
+        
+        # Reset step agar bot kembali ke mode normal
         await save(uid, {"step": None})
-        await update.message.reply_text(f"✅ Slot '{text}' disimpan!", reply_markup=await menu_utama(uid)); return
+        await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid))
+        return
 
     if s["step"] == "action":
         idx = s.get("selected", -1); tag = s["name"] if idx == -1 else s["chars"][idx]["name"]
