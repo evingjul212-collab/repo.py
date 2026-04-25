@@ -118,7 +118,7 @@ async def msg(update, context):
 async def callback(update, context):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
 
-   elif q.data == "lanjut":
+    elif q.data == "lanjut":
         # 1. Kasih tanda loading biar Boss gak nunggu tanpa kepastian
         loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens (±1000 karakter)...")
         
