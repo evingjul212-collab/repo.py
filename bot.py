@@ -22,7 +22,7 @@ def fix_state(s):
     if not s: s = {}
     return {
         "_id": s.get("_id"),
-        "name": s.get("name") or "User",
+        "name": s.get("name"),
         "desc_utama": s.get("desc_utama") or "Tokoh Utama",
         "step": s.get("step"),
         "history": s.get("history", []),
@@ -121,11 +121,26 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- LOGIKA EDIT BERUNTUN ---
     
     # Tahap 1: Tangkap Nama, lalu minta Deskripsi
-    if s["step"] and s["step"].startswith("editname_"):
+    elif s["step"] and s["step"].startswith("editdesc_"):
         idx = int(s["step"].split("_")[1])
-        # Simpan nama sementara di database
-        await save(uid, {"temp_name": text, "step": f"editdesc_{idx}"})
-        await update.message.reply_text(f"✅ Nama disimpan: **{text}**\n\nSekarang, masukkan **DESKRIPSI** barunya:")
+        new_name = s.get("temp_char") # Ini menangkap nama 'Maya' yang Boss input sebelumnya
+        new_desc = text # Ini deskripsi yang baru Boss input
+        
+        if idx == -1: 
+            # LOGIKA SIMPAN TOKOH UTAMA
+            await save(uid, {
+                "name": new_name,        # Simpan nama baru ke field 'name'
+                "desc_utama": new_desc,  # Simpan deskripsi baru
+                "step": None, 
+                "temp_char": None
+            })
+        else: 
+            # LOGIKA SIMPAN NPC
+            s["chars"][idx]["name"] = new_name
+            s["chars"][idx]["desc"] = new_desc
+            await save(uid, {"chars": s["chars"], "step": None, "temp_char": None})
+            
+        await update.message.reply_text(f"✨ Karakter {new_name} berhasil diperbarui!", reply_markup=await menu_utama(uid))
         return
 
     # Tahap 2: Tangkap Deskripsi, lalu simpan permanen
