@@ -205,15 +205,10 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Tahap 2: Setelah Boss input Deskripsi Baru
     if s["step"] and s["step"].startswith("descr_updating_"):
         idx = int(s["step"].split("_")[2])
-        new_name = s.get("temp_char") # Mengambil nama yang Boss input tadi
+        new_name = s.get("temp_char") # Nama yang tadi diinput
         
-        if idx == -1: # Update Tokoh Utama (Misal: Maya)
-            await save(uid, {
-                "name": new_name,        # Simpan Nama Permanen
-                "desc_utama": text,      # Simpan Deskripsi Permanen
-                "step": None, 
-                "temp_char": None
-            })
+        if idx == -1: # Update Tokoh Utama
+            await save(uid, {"name": new_name, "desc_utama": text, "step": None, "temp_char": None})
         else: # Update NPC
             s["chars"][idx]["name"] = new_name
             s["chars"][idx]["desc"] = text
