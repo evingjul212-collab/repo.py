@@ -155,14 +155,35 @@ async def callback(update, context):
             kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
         kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
         await q.message.reply_text("📋 **Daftar Karakter:**", reply_markup=InlineKeyboardMarkup(kb))
+   #================================================
     elif q.data.startswith("sel_"):
-        idx = int(q.data.split("_")[1]); await save(uid, {"selected": idx})
-        kb = [[InlineKeyboardButton("🎮 Aksi", callback_data="act_run")],
-              [InlineKeyboardButton("🎬 New Story", callback_data="new_start")],
-              [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")],
-              [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]]
-        name = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        await q.edit_message_text(f"Karakter: {name}", reply_markup=InlineKeyboardMarkup(kb))
+        idx = int(q.data.split("_")[1])
+        await save(uid, {"selected": idx})
+        # Ambil data Nama dan Deskripsi sesuai pilihan index
+        if idx == -1:
+            name = s["name"]
+            desc = s.get("desc_utama", "Belum ada deskripsi untuk Tokoh Utama.")
+        else:
+            name = s["chars"][idx]["name"]
+            desc = s["chars"][idx].get("desc", "Belum ada deskripsi untuk NPC ini.")
+       # Buat tombol navigasi
+        kb = [
+            [InlineKeyboardButton("🎮 Aksi", callback_data="act_run")],
+            [InlineKeyboardButton("🎬 New Story", callback_data="new_start")],
+            [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]
+        ]
+        
+        # Tampilkan Nama dan Deskripsinya sekaligus
+        teks_tampilan = (
+            f"👤 **Detail Karakter**\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"📛 **Nama:** {name}\n"
+            f"📖 **Deskripsi:**\n{desc}"
+        )
+        
+        # Gunakan edit_message_text agar menu karakter tetap rapi di satu tempat
+        await q.edit_message_text(teks_tampilan, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
     elif q.data.startswith("edit_"):
         idx = q.data.split("_")[1]; await save(uid, {"step": f"editname_{idx}"})
