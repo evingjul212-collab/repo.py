@@ -50,7 +50,7 @@ async def tampilkan_blok_terbaru(uid, context, s):
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 #=================================
 # --- ENGINE AI --- generator
-    async def generate_response(prompt, history, s, force_options=False):
+async def generate_response(prompt, history, s, force_options=False):
     # Gabungkan data semua NPC agar AI tahu siapa saja yang ada di dunia ini
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
     
