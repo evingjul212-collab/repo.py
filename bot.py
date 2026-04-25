@@ -37,7 +37,17 @@ async def get_state(uid):
 
 async def save(uid, data):
     await users.update_one({"_id": uid}, {"$set": data}, upsert=True)
-
+    
+async def tampilkan_blok_terbaru(uid, context, s):
+    history = s.get("history", [])
+    if history:
+        # Ambil hanya 1 yang paling terakhir (hasil generate terbaru)
+        teks = history[-1]
+    else:
+        teks = "📖 Belum ada cerita. Mulailah petualanganmu!"
+    
+    # Kirim pesan baru + Menu Utama
+    await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 # --- ENGINE AI ---
 async def generate_response(prompt, history, force_options=False):
     system = (
