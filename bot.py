@@ -292,72 +292,43 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_display = f"Karakter: {name}\n\nInfo: {info}"
         await q.edit_message_text(text_display, reply_markup=InlineKeyboardMarkup(kb))
         #============================================================
+        #    New story
     elif q.data.startswith("new_story_"):
-        # Mengambil angka setelah underscore terakhir
-        # Contoh: "new_story_-1" -> "-1"
+        # 1. Ambil ID Karakter
         try:
             idx = int(q.data.rsplit("_", 1)[1])
-        except (IndexError, ValueError):
-            # Fallback jika split gagal
+        except:
             idx = s.get("selected", -1)
         
-        # Ambil data terbaru dari database
+        # 2. Ambil data terbaru (termasuk Nama/Desc yang baru diedit)
         s = await get_state(uid) 
-        
-        # Tentukan identitas
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
         
-        # Reset History
+        await q.message.reply_text(f"🎬 Memulai cerita baru untuk {name}...")
+        
+        # 3. Siapkan Prompt & System
         new_history = []
         system_prompt = build_system(name, desc)
+        starting_prompt = f"Buat adegan pembuka novel visual yang dramatis untuk {name} berdasarkan profil: {desc}"
         
-        # Prompt Instruksi
-        instruction = (
-            f"Mulai cerita baru sebagai {name}. "
-            f"Latar belakang: {desc}. "
-            f"Buat adegan pembuka novel visual yang dramatis."
-        )
-        
-        await q.message.reply_text(f"🎬 Memulai cerita baru: {name}...")
-        
-        # Generate
-        out, _ = await generate(instruction, system_prompt, new_history)
+        # 4. CUKUP 1X GENERATE (Hapus blok generate kedua di kode lama Boss)
+        out, _ = await generate(starting_prompt, system_prompt, new_history)
         
         if out:
             new_history.append(f"[{name}]: {out}")
+            # 5. Simpan semuanya sekaligus
             await save(uid, {
                 "history": new_history,
                 "selected": idx,
-                "last_prompt": instruction,
-                "last_system": system_prompt,
-                "step": None
-            })
-            await safe_send(q, out, name, await menu_utama(uid))
-        else:
-            await q.message.reply_text("⚠️ AI sedang sibuk. Coba klik 🔄 Regen.", reply_markup=await menu_utama(uid))
-        
-        # Prompt otomatis mengambil dari deskripsi karakter
-        starting_prompt = f"Buat adegan pembuka yang dramatis untuk {name} berdasarkan deskripsi ini: {desc}"
-        
-        await q.message.reply_text(f"🎬 Menyiapkan cerita baru untuk {name}...")
-        
-        # Generate konten pertama
-        out, model_used = await generate(starting_prompt, system_prompt, s["history"])
-        
-        if out:
-            s["history"].append(f"[{name}]: {out}")
-            # Simpan semua status terbaru termasuk prompt terakhir untuk fitur Regen
-            await save(uid, {
-                "history": s["history"], 
-                "selected": idx, 
-                "last_prompt": starting_prompt, 
+                "last_prompt": starting_prompt,
                 "last_system": system_prompt,
                 "step": None
             })
             await safe_send(q, out, name, await menu_utama(uid))
         else:
             await q.message.reply_text("⚠️ Gagal memulai cerita. Coba klik 🔄 Regen.", reply_markup=await menu_utama(uid))
+        return # Pastikan return agar tidak lanjut ke bawah
 #=========================
     elif q.data == "reset_confirm":
         # Menghapus data dan mengembalikan step ke 'set_name'
