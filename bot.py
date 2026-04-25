@@ -75,6 +75,19 @@ PERAN: {tag} ({desc})
 FORMAT: Dialog "..." dan Narasi *(...)*.
 """
 
+# KHUSUS UNTUK LANJUT (ROMCOM MODE)
+def build_romcom_system(tag, desc):
+    return f"""
+Kamu adalah penulis Novel Visual genre Romantic Comedy (RomCom).
+PERAN: {tag} ({desc})
+ATURAN WAJIB:
+1. Genre RomCom: Fokus pada interaksi manis, lucu, awkward, dan masuk akal.
+2. DILARANG HOROR: Jangan ada suara misterius, hantu, atau elemen supernatural.
+3. KONFLIK: Konflik harus seputar hubungan, kecemburuan, salah paham lucu, atau situasi sosial yang canggung.
+4. PANJANG: Maksimal 2 paragraf (total sekitar 1000 karakter).
+5. FORMAT: Dialog "..." dan Narasi *(...)*.
+"""
+
 # ========= UI =========
 async def menu_utama(uid):
     kb = [
@@ -90,37 +103,21 @@ async def menu_utama(uid):
     ]
     return InlineKeyboardMarkup(kb)
 
-# PERBAIKAN KRUSIAL: Anti Message Too Long
 async def safe_send(obj, current_text, prev_text, tag, markup):
     target = obj.message if hasattr(obj, "message") else obj.effective_message
-    
-    # 1. Bersihkan prev_text jika terlalu panjang (ambil 1000 char saja)
     clean_prev = prev_text[:1000] + "..." if len(prev_text) > 1000 else prev_text
-    
-    # 2. Susun pesan
     header = f"✨ *{tag}*\n\n"
-    if clean_prev:
-        context_msg = f"_[Cerita Sebelumnya]_\n{clean_prev}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-    else:
-        context_msg = ""
-    
-    # 3. Gabungkan dan cek total karakter (Limit Telegram 4096)
+    context_msg = f"_[Cerita Sebelumnya]_\n{clean_prev}\n\n━━━━━━━━━━━━━━━━━━━━\n\n" if clean_prev else ""
     full_content = header + current_text
     
-    # Jika digabung dengan konteks jadi kepanjangan, hapus konteksnya saja
     if len(context_msg + full_content) > 4000:
         final_text = full_content
     else:
         final_text = context_msg + full_content
 
-    # Potong paksa jika masih kepanjangan (Emergency cut)
-    if len(final_text) > 4090:
-        final_text = final_text[:4090]
-
     try:
         await target.reply_text(final_text, parse_mode="Markdown", reply_markup=markup)
     except:
-        # Jika markdown error, kirim teks polos
         await target.reply_text(final_text[:4090], reply_markup=markup)
 
 # ========= HANDLERS =========
@@ -138,6 +135,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🔥 Selamat datang, {text.capitalize()}!", reply_markup=await menu_utama(uid))
         return
 
+    # EDIT PROSES (TETAP)
     if s["step"] and s["step"].startswith("editname_"):
         idx = int(s["step"].split("_")[1])
         await save(uid, {"temp_char": text.capitalize(), "step": f"editdesc_final_{idx}"})
@@ -155,7 +153,7 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✨ Karakter {new_name} diperbarui!", reply_markup=await menu_utama(uid))
         return
 
-    # LOGIKA PILIHAN A B C D (FIXED)
+    # PILIHAN A B C D (TETAP)
     if s["history"] and "apa yang akan kamu lakukan?" in s["history"][-1].lower():
         if re.match(r'^[a-d]$', text):
             pilihan = text.upper()
@@ -163,7 +161,6 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tag = s["name"] if idx == -1 else s["chars"][idx]["name"]
             system = build_system(tag, s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"])
             prompt = f"User memilih opsi {pilihan}. Lanjutkan adegan."
-            await save(uid, {"last_prompt": prompt, "last_system": system})
             prev_block = s["history"][-1]
             out, _ = await generate(prompt, system, s["history"])
             if out:
@@ -178,7 +175,6 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tag = "NARASI" if is_nar else (s["name"] if idx == -1 else s["chars"][idx]["name"])
         system = build_system(tag, s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"])
         prompt = f"AKSI: {text}"
-        await save(uid, {"last_prompt": prompt, "last_system": system})
         prev_block = s["history"][-1] if s["history"] else ""
         out, _ = await generate(prompt, system, s["history"])
         if out:
@@ -220,10 +216,9 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = int(q.data.split("_")[-1])
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         sys = build_system(name, s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"])
-        pr = "Mulai adegan pembuka."
-        out, _ = await generate(pr, sys, [])
+        out, _ = await generate("Mulai adegan pembuka novel visual romcom.", sys, [])
         if out:
-            await save(uid, {"history": [f"[{name}]: {out}"], "selected": idx, "last_prompt": pr, "last_system": sys, "step": None})
+            await save(uid, {"history": [f"[{name}]: {out}"], "selected": idx, "last_prompt": "Start", "last_system": sys, "step": None})
             await safe_send(q, out, "", name, await menu_utama(uid))
 
     elif q.data == "regen":
@@ -236,16 +231,26 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s["history"].append(f"[{tag_regen}]: {out}"); await save(uid, {"history": s["history"]})
             await safe_send(q, out, prev_block_regen, tag_regen, await menu_utama(uid))
     
+    # ========= PERBAIKAN KHUSUS OPSI LANJUT =========
     elif q.data == "lanjut":
         if s["history"] and "apa yang akan kamu lakukan?" in s["history"][-1].lower():
             await q.message.reply_text("⚠️ Pilih opsi (A, B, C, D) dulu Boss!")
             return
+            
         idx = s.get("selected", -1)
         tag = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        desc = s["desc_utama"] if idx == -1 else s["chars"][idx]["desc"]
+        
+        # System khusus RomCom & Hemat Paragraf
+        system_lanjut = build_romcom_system(tag, desc)
+        prompt_lanjut = "Lanjutkan cerita romcom ini. Fokus pada perkembangan situasi yang lucu atau manis. Maksimal 2 paragraf."
+        
         prev_block_lanjut = s["history"][-1] if s["history"] else ""
-        out, _ = await generate("Lanjutkan cerita.", build_system(tag, ""), s["history"])
+        
+        out, _ = await generate(prompt_lanjut, system_lanjut, s["history"])
         if out: 
-            s["history"].append(f"[{tag}]: {out}"); await save(uid, {"history": s["history"]})
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"], "last_prompt": prompt_lanjut, "last_system": system_lanjut})
             await safe_send(q, out, prev_block_lanjut, tag, await menu_utama(uid))
 
     elif q.data == "reset_confirm":
@@ -255,7 +260,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data.startswith("act_"): await save(uid, {"step": "action"}); await q.message.reply_text("Aksi?")
     elif q.data == "step_narator": await save(uid, {"step": "narator_input"}); await q.message.reply_text("Kejadian?")
 
-# ========= RUNNER (ANTI-CONFLICT) =========
+# ========= RUNNER =========
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
@@ -268,5 +273,5 @@ if __name__ == "__main__":
         await app.shutdown()
     
     asyncio.get_event_loop().run_until_complete(cleanup())
-    print("🔥 RPG BOT READY - TANCAP GAS!")
+    print("🔥 RPG BOT READY - LANJUT ROMCOM ONLY!")
     app.run_polling(drop_pending_updates=True)
