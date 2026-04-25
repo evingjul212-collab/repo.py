@@ -264,12 +264,41 @@ async def callback(update, context):
             # Tampilkan hasilnya
             await tampilkan_blok_terbaru(uid, context, {"history": new_history})        
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
-    elif q.data == "undo" and s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Back.")
+    elif q.data == "undo":
+        if s["history"]:
+            s["history"].pop() # Hapus satu baris riwayat
+            await save(uid, {"history": s["history"]})
+            await q.message.reply_text("↩️ Berhasil kembali ke alur sebelumnya.")
+            await tampilkan_blok_terbaru(uid, context, s)
+        else:
+            await q.message.reply_text("📖 Riwayat sudah kosong.")
     elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
     elif q.data == "main_menu": await q.message.reply_text("📱 **Menu Utama:**", reply_markup=await menu_utama(uid))
     elif q.data == "save_manual":
         await save(uid, {"step": "save_manual_step"})
         await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
+
+    elif q.data == "regen":
+        if not s["history"]:
+            await q.message.reply_text("❌ Tidak ada cerita untuk di-regen!")
+            return
+
+        loading_msg = await q.message.reply_text("🔄 Menulis ulang cerita terakhir...")
+        
+        # 1. Hapus cerita terakhir yang dianggap jelek dari history
+        s["history"].pop()
+        
+        # 2. Ambil prompt terakhir (AI akan baca konteks sisa history)
+        # Kita minta AI lanjutin lagi seolah-olah yang jelek tadi gak pernah ada
+        out = await generate_response("Ulangi bagian terakhir dengan alur yang lebih menarik, ±1000 karakter.", s["history"], True)
+        
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            s["history"].append(f"[STORY]:\n{out}")
+            await save(uid, {"history": s["history"]})
+            await tampilkan_blok_terbaru(uid, context, s)
 # --- START ---
 async def start(update: Update, context):
     uid = update.effective_user.id
