@@ -5,6 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 from google import genai
+from bson import ObjectId
 
 # ========= CONFIG =========
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -28,7 +29,8 @@ def fix_state(s):
         "chars": s.get("chars", []),
         "selected": s.get("selected", -1),
         "last_prompt": s.get("last_prompt"),
-        "last_system_type": s.get("last_system_type") # True = ABCD, False = Interaktif
+        "last_system_type": s.get("last_system_type"),
+        "temp_val": s.get("temp_val")
     }
 
 async def get_state(uid):
@@ -57,7 +59,7 @@ async def generate_response(prompt, history, force_options=False):
         except: continue
     return None
 
-# ========= UI =========
+# ========= UI COMPONENTS =========
 async def menu_utama(uid):
     kb = [
         [InlineKeyboardButton("📜 Karakter", callback_data="list_all")],
@@ -74,19 +76,29 @@ async def safe_send(obj, current_text, prev_text, tag, markup):
     context_msg = f"_[Sebelumnya]_\n{prev_text[:200]}...\n\n━━━━━━━━━━\n\n" if prev_text else ""
     await target.reply_text((context_msg + header + current_text)[:4000], parse_mode="Markdown", reply_markup=markup)
 
-# ========= HANDLERS =========
-async def start(update, context):
-    await save(update.effective_user.id, {"name": None, "step": "set_name", "history": [], "chars": []})
-    await update.message.reply_text("🎮 RomCom RPG\nMasukkan nama karakter utama:")
-
+# ========= MESSAGE HANDLERS =========
 async def msg(update, context):
     uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
 
+    # 1. SETUP NAMA AWAL
     if s["step"] == "set_name":
         await save(uid, {"name": text.capitalize(), "step": None})
         await update.message.reply_text(f"Selamat datang {text.capitalize()}!", reply_markup=await menu_utama(uid)); return
 
-    # RESPON PILIHAN A-B-C-D
+    # 2. PROSES EDIT (NAMA -> DESKRIPSI)
+    if s["step"] and s["step"].startswith("editname_"):
+        idx = int(s["step"].split("_")[1])
+        await save(uid, {"temp_val": text, "step": f"editdesc_{idx}"})
+        await update.message.reply_text(f"Nama baru: {text}. Sekarang masukkan DESKRIPSI karakter:"); return
+    
+    if s["step"] and s["step"].startswith("editdesc_"):
+        idx = int(s["step"].split("_")[1])
+        if idx == -1: s["name"], s["desc_utama"] = s["temp_val"], text
+        else: s["chars"][idx]["name"], s["chars"][idx]["desc"] = s["temp_val"], text
+        await save(uid, {"name": s["name"], "desc_utama": s["desc_utama"], "chars": s["chars"], "step": None, "temp_val": None})
+        await update.message.reply_text("✨ Karakter diperbarui!", reply_markup=await menu_utama(uid)); return
+
+    # 3. RESPON PILIHAN ABCD
     if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
         out = await generate_response(f"User pilih {text.upper()}", s["history"], force_options=True)
         if out:
@@ -94,7 +106,7 @@ async def msg(update, context):
             await save(uid, {"history": s["history"], "last_prompt": f"Pilih {text.upper()}", "last_system_type": True})
             await safe_send(update, out, prev, "STORY", await menu_utama(uid)); return
 
-    # AKSI KARAKTER (INTERAKTIF)
+    # 4. AKSI KARAKTER (INTERAKTIF)
     if s["step"] == "action":
         idx = s.get("selected", -1); tag = s["name"] if idx == -1 else s["chars"][idx]["name"]
         out = await generate_response(f"Aksi {tag}: {text}", s["history"], force_options=False)
@@ -103,7 +115,12 @@ async def msg(update, context):
             await save(uid, {"history": s["history"], "step": None, "last_prompt": text, "last_system_type": False})
             await safe_send(update, out, prev, tag, await menu_utama(uid)); return
 
-# ========= CALLBACKS =========
+    # 5. SAVE SLOT NAME
+    if s["step"] == "save_name":
+        await archives.insert_one({"user_id": uid, "save_name": text, "history": s["history"], "chars": s["chars"], "name": s["name"], "desc_utama": s["desc_utama"]})
+        await save(uid, {"step": None}); await update.message.reply_text(f"✅ Slot '{text}' Tersimpan!", reply_markup=await menu_utama(uid)); return
+
+# ========= CALLBACK HANDLERS =========
 async def callback(update, context):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
 
@@ -117,8 +134,8 @@ async def callback(update, context):
     elif q.data == "list_all":
         kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
         for i, c in enumerate(s["chars"]): kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
-        kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
-        await q.edit_message_text("📜 Karakter:", reply_markup=InlineKeyboardMarkup(kb))
+        kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
+        await q.edit_message_text("📜 Daftar Karakter:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1]); await save(uid, {"selected": idx})
@@ -128,37 +145,47 @@ async def callback(update, context):
               [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]]
         await q.edit_message_text(f"Menu Karakter.", reply_markup=InlineKeyboardMarkup(kb))
 
+    elif q.data == "load_list":
+        items = await archives.find({"user_id": uid}).sort("_id", -1).to_list(10)
+        if not items: await q.message.reply_text("📂 Belum ada save-an."); return
+        kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load_{i['_id']}")] for i in items]
+        kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
+        await q.edit_message_text("Pilih slot yang akan di-load:", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data.startswith("load_"):
+        data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
+        if data:
+            await save(uid, {"history": data["history"], "chars": data.get("chars", []), "name": data["name"], "desc_utama": data.get("desc_utama", "Tokoh Utama"), "step": None})
+            txt = data["history"][-1] if data["history"] else "Data dimuat."
+            await q.message.reply_text(f"✅ **LOAD SUCCESS**\n\n{txt}", reply_markup=await menu_utama(uid))
+
+    elif q.data.startswith("edit_"):
+        idx = q.data.split("_")[1]
+        await save(uid, {"step": f"editname_{idx}"})
+        await q.message.reply_text("Masukkan NAMA baru untuk karakter ini:")
+
     elif q.data == "undo" and s["history"]:
         s["history"].pop(); await save(uid, {"history": s["history"]})
         await q.message.reply_text("↩️ Back Berhasil (History Mundur).", reply_markup=await menu_utama(uid))
 
-    elif q.data == "regen" and s.get("last_prompt"):
-        s["history"].pop(); out = await generate_response(s["last_prompt"], s["history"], force_options=s.get("last_system_type", False))
-        if out:
-            s["history"].append(out); await save(uid, {"history": s["history"]})
-            await q.message.reply_text(f"🔄 Regenerate:\n\n{out}", reply_markup=await menu_utama(uid))
-
+    elif q.data == "save_manual":
+        await save(uid, {"step": "save_name"}); await q.message.reply_text("Ketik nama save slot:")
     elif q.data == "main_menu": await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama(uid))
     elif q.data.startswith("act_"): await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi/dialog:")
-    elif q.data == "show_history":
-        h = "\n\n".join(s["history"])
-        for i in range(0, len(h), 4000): await q.message.reply_text(f"📖 Riwayat:\n\n{h[i:i+4000]}")
     elif q.data == "reset_confirm":
         await save(uid, {"name": None, "history": [], "chars": [], "step": "set_name"})
-        await q.message.reply_text("🧹 Reset! Masukkan nama baru:")
+        await q.message.reply_text("🧹 Reset Berhasil! Masukkan nama baru:")
 
 # ========= RUN =========
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("start", lambda u, c: save(u.effective_user.id, {"step": "set_name"}) or u.message.reply_text("Masukkan nama karakter utama:")))
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
     
-    # SOLUSI CONFLICT RAILWAY: Delete webhook secara sinkron sebelum polling
     async def clean_start():
-        bot = app.bot
-        await bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Webhook Berhasil Dibersihkan. Siap jalan! ini boss")
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Polling dimulai. Jalur fungsi sudah diaudit!")
 
     asyncio.get_event_loop().run_until_complete(clean_start())
     app.run_polling(drop_pending_updates=True)
