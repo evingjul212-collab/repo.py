@@ -51,9 +51,8 @@ async def tampilkan_blok_terbaru(uid, context, s):
 #=================================
 # --- ENGINE AI --- generator
 async def generate_response(prompt, history, s, force_options=False):
-    # Gabungkan data semua NPC agar AI tahu siapa saja yang ada di dunia ini
+    # s sekarang ada di posisi ketiga
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
-    
     system = (
         f"Kamu adalah Penulis Novel Visual RomCom.\n"
         f"TOKOH UTAMA: {s['name']} ({s.get('desc_utama', '')})\n"
@@ -161,7 +160,7 @@ async def callback(update, context):
     if q.data == "lanjut": # PERBAIKAN: Gunakan 'if' bukan 'elif' di awal
         loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens (±1000 karakter)...")
         prompt_lanjut = "Lanjutkan alur cerita dengan dialog emosional dominan, sekitar 1000 karakter."
-        out = await generate_response(prompt_lanjut, s["history"], True) 
+        out = await generate_response(prompt_lanjut, s["history"], s, True) 
         if out:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             s["history"].append(f"[STORY]:\n{out}"); 
@@ -228,29 +227,38 @@ async def callback(update, context):
     # new story
     elif q.data == "new_start":
         idx = s.get("selected", -1)
-        # Karakter target yang dipilih Boss
-        target_name = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        loading_msg = await q.message.reply_text("🎬 Menyiapkan skenario...")
         
-        loading_msg = await q.message.reply_text("🎬 Menyiapkan suasana...")
+        if idx == -1:
+            # SKENARIO TOKOH UTAMA: Pilihkan satu NPC yang relevan
+            prompt_awal = (
+                f"Mulai cerita baru dari sudut pandang Tokoh Utama: {s['name']}. "
+                f"Setting: Narasi suasana lokasi dan waktu yang detail. "
+                f"INSTRUKSI KHUSUS: Pilih HANYA SATU NPC dari daftar yang paling relevan dengan deskripsi {s['name']} "
+                f"(Misal: jika disebutkan tinggal dengan pembantu, panggil NPC pembantu). "
+                f"NPC lain dilarang muncul. Fokus pada interaksi berdua saja."
+            )
+        else:
+            # SKENARIO NPC: Hanya Tokoh Utama + NPC Pilihan
+            npc_name = s["chars"][idx]["name"]
+            npc_desc = s["chars"][idx].get("desc", "")
+            prompt_awal = (
+                f"Mulai cerita baru. Fokus interaksi antara {s['name']} (Tokoh Utama) dengan {npc_name} ({npc_desc}). "
+                f"Setting: Narasi suasana lokasi dan waktu. "
+                f"DILARANG memunculkan NPC lain selain {npc_name}. Fokus pada hubungan mereka berdua."
+            )
         
-        prompt_awal = (
-            f"Mulai cerita baru. Awali dengan narasi suasana lokasi dan waktu. "
-            f"Fokus interaksi antara {s['name']} dengan {target_name}. "
-            f"Cari NPC lain dari daftar yang relevan dengan situasi ini (misal pembantu jika di rumah)."
-        )
-        
-        # GENERATE CUKUP 1 KALI SAJA DISINI
+        # Panggil AI (Pastikan urutan parameter: prompt, history, s, force_options)
         out = await generate_response(prompt_awal, [], s, True)
         
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
             
-            # SIMPAN CUKUP 1 KALI
             new_h = [f"[STORY]:\n{out}"]
             await save(uid, {"history": new_h})
-            await tampilkan_blok_terbaru(uid, context, {"history": new_h})        
-           #====================================================        
+            await tampilkan_blok_terbaru(uid, context, {"history": new_h})     
+    #====================================================        
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo":
         if s["history"]:
