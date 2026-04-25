@@ -180,13 +180,25 @@ async def callback(update, context):
     elif q.data == "main_menu": await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama(uid))
     elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
 
-# --- MAIN ---
+# --- FUNGSI START YANG BENAR ---
+async def start(update: Update, context):
+    uid = update.effective_user.id
+    # Memastikan save ditunggu (await) agar step terkunci
+    await save(uid, {"step": "set_name", "history": [], "chars": []}) 
+    await update.message.reply_text("Siapa namamu?")
+
+# --- BAGIAN RUNNING ---
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", lambda u, c: asyncio.run(save(u.effective_user.id, {"step": "set_name"})) or u.message.reply_text("Nama?")))
+    
+    # Jangan pakai lambda yang rumit, pakai fungsi start di atas
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
     
+    # Hapus webhook lama agar tidak bentrok
     loop = asyncio.get_event_loop()
     loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
+    
+    print("✅ Bot sudah diperbaiki dan siap jalan!")
     app.run_polling(drop_pending_updates=True)
