@@ -258,6 +258,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "\n\n".join(s["history"])
         file_data = io.BytesIO(text.encode()); file_data.name = "story.txt"
         await q.message.reply_document(file_data)
+    #=================================================
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1])
         # Menentukan identitas karakter berdasarkan index
@@ -276,6 +277,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text_display = f"Karakter: {name}\n\nInfo: {info}"
         await q.edit_message_text(text_display, reply_markup=InlineKeyboardMarkup(kb))
+        #============================================================
     elif q.data.startswith("new_story_"):
         # Mengambil angka setelah underscore terakhir
         # Contoh: "new_story_-1" -> "-1"
@@ -342,7 +344,19 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_send(q, out, name, await menu_utama(uid))
         else:
             await q.message.reply_text("⚠️ Gagal memulai cerita. Coba klik 🔄 Regen.", reply_markup=await menu_utama(uid))
-
+#=========================
+    elif q.data == "reset_confirm":
+        # Menghapus data dan mengembalikan step ke 'set_name'
+        await save(uid, {
+            "name": None, 
+            "desc_utama": "Tokoh Utama",
+            "history": [], 
+            "chars": [], 
+            "step": "set_name",
+            "selected": -1
+        })
+        await q.message.reply_text("🧹 Seluruh data telah dihapus.\n\n🎮 Masukkan nama karakter utama baru:")
+        #===========================================
     elif q.data.startswith("act_"):
         idx = int(q.data.split("_")[1]); name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         await save(uid, {"selected": idx, "step": "action"}); await q.message.reply_text(f"Aksi {name}?")
