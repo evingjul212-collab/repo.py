@@ -136,9 +136,9 @@ async def callback(update, context):
         out = await generate_response(prompt_lanjut, s["history"], True) 
         if out:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
-            await tampilkan_dua_blok(uid, context, s)
-
+            s["history"].append(f"[STORY]:\n{out}"); 
+            await save(uid, {"history": s["history"]})
+            await tampilkan_blok_terbaru(uid, context, s)
     elif q.data == "list_all":
         kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
         for i, c in enumerate(s["chars"]): 
