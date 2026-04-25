@@ -190,7 +190,7 @@ async def start(update: Update, context):
     await save(uid, {"step": "set_name", "history": [], "chars": []}) 
     await update.message.reply_text("Siapa namamu?")
 #==========================
-# funsi tetap tampilkan cerita
+# funsi tetap tampilkan cerita 
 async def tampilkan_dua_blok(uid, context, s):
     history = s.get("history", [])
     if len(history) >= 2:
