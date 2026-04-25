@@ -108,7 +108,7 @@ async def safe_send(obj, text, tag, markup):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await save(update.effective_user.id, {"name": None, "step": "set_name", "history": [], "chars": []})
     await update.message.reply_text("🎮 RPG Engine\n\nMasukkan nama karakter utama:")
-
+#======================== msg================================
 async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
@@ -118,7 +118,40 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await save(uid, {"name": text, "step": None})
         await update.message.reply_text(f"🔥 Selamat datang, {text}!", reply_markup=await menu_utama(uid))
         return
+# --- LOGIKA EDIT BERUNTUN ---
+    
+    # Tahap 1: Tangkap Nama, lalu minta Deskripsi
+    if s["step"] and s["step"].startswith("editname_"):
+        idx = int(s["step"].split("_")[1])
+        # Simpan nama sementara di database
+        await save(uid, {"temp_name": text, "step": f"editdesc_{idx}"})
+        await update.message.reply_text(f"✅ Nama disimpan: **{text}**\n\nSekarang, masukkan **DESKRIPSI** barunya:")
+        return
 
+    # Tahap 2: Tangkap Deskripsi, lalu simpan permanen
+    elif s["step"] and s["step"].startswith("editdesc_"):
+        idx = int(s["step"].split("_")[1])
+        new_name = s.get("temp_name")
+        new_desc = text
+        
+        if idx == -1: # Jika yang diedit Tokoh Utama
+            await save(uid, {
+                "name": new_name, 
+                "desc_utama": new_desc, 
+                "step": None, 
+                "temp_name": None # hapus temp
+            })
+        else: # Jika yang diedit NPC
+            s["chars"][idx]["name"] = new_name
+            s["chars"][idx]["desc"] = new_desc
+            await save(uid, {
+                "chars": s["chars"], 
+                "step": None, 
+                "temp_name": None # hapus temp
+            })
+            
+        await update.message.reply_text("✨ Sip! Nama dan Deskripsi berhasil diperbarui.", reply_markup=await menu_utama(uid))
+        return
     # LOGIKA SAVE MANUAL
     if s["step"] == "save_name_input":
         save_data = {
@@ -360,8 +393,13 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data.startswith("act_"):
         idx = int(q.data.split("_")[1]); name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         await save(uid, {"selected": idx, "step": "action"}); await q.message.reply_text(f"Aksi {name}?")
+        #==============================================
     elif q.data.startswith("edit_"):
-        idx = int(q.data.split("_")[1]); await save(uid, {"step": f"updating_{idx}"}); await q.message.reply_text("Deskripsi?")
+        idx = int(q.data.split("_")[1])
+        # Simpan index yang diedit dan ubah step ke input nama
+        await save(uid, {"selected": idx, "step": f"editname_{idx}"})
+        await q.message.reply_text("📝 Masukkan NAMA baru untuk karakter ini:")
+        #==================================================
     elif q.data == "step_narator": await save(uid, {"step": "narator_input"}); await q.message.reply_text("🎭 Kejadian?")
     elif q.data == "undo":
         if s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]})
