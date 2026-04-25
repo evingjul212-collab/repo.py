@@ -192,13 +192,34 @@ async def msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Karakter ditambahkan!", reply_markup=await menu_utama(uid))
         return
 
+  # === LOGIKA EDIT NAMA & DESKRIPSI (VERSI TERBARU) ===
+    
+    # Tahap 1: Setelah Boss input Nama Baru
     if s["step"] and s["step"].startswith("updating_"):
         idx = int(s["step"].split("_")[1])
-        if idx == -1: await save(uid, {"desc_utama": text, "step": None})
-        else:
+        # Simpan nama ke gudang sementara (temp_char) dan pindah ke step deskripsi
+        await save(uid, {"temp_char": text, "step": f"descr_updating_{idx}"})
+        await update.message.reply_text(f"✅ Nama disimpan: **{text}**\n\nSekarang, masukkan **DESKRIPSI** barunya:")
+        return
+
+    # Tahap 2: Setelah Boss input Deskripsi Baru
+    if s["step"] and s["step"].startswith("descr_updating_"):
+        idx = int(s["step"].split("_")[2])
+        new_name = s.get("temp_char") # Mengambil nama yang Boss input tadi
+        
+        if idx == -1: # Update Tokoh Utama (Misal: Maya)
+            await save(uid, {
+                "name": new_name,        # Simpan Nama Permanen
+                "desc_utama": text,      # Simpan Deskripsi Permanen
+                "step": None, 
+                "temp_char": None
+            })
+        else: # Update NPC
+            s["chars"][idx]["name"] = new_name
             s["chars"][idx]["desc"] = text
-            await save(uid, {"chars": s["chars"], "step": None})
-        await update.message.reply_text("✅ Update berhasil.", reply_markup=await menu_utama(uid))
+            await save(uid, {"chars": s["chars"], "step": None, "temp_char": None})
+            
+        await update.message.reply_text(f"✨ Karakter {new_name} berhasil diperbarui!", reply_markup=await menu_utama(uid))
         return
 
     if s["step"] == "char_name":
