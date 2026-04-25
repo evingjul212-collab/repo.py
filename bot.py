@@ -215,17 +215,16 @@ async def callback(update, context):
             await save(uid, s_new)
             await q.message.reply_text("✅ LOAD SUCCESS!")
             await tampilkan_dua_blok(uid, context, s_new)
-
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo" and s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Back.")
     elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
     elif q.data == "main_menu":
     elif q.data == "save_manual":
         # Kunci user ke step simpan agar pesan teks selanjutnya dianggap sebagai nama slot
-        await save(uid, {"step": "save_manual_step"})
-        await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
+            await save(uid, {"step": "save_manual_step"})
+            await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
         # Pastikan menu utama muncul sebagai pesan baru
-        await q.message.reply_text("📱 **Menu Utama:**", reply_markup=await menu_utama(uid))
+            await q.message.reply_text("📱 **Menu Utama:**", reply_markup=await menu_utama(uid))
 # --- START ---
 async def start(update: Update, context):
     uid = update.effective_user.id
