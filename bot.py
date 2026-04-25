@@ -225,14 +225,30 @@ async def callback(update, context):
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         desc = s.get("desc_utama") if idx == -1 else s["chars"][idx].get("desc")
         
-        loading_msg = await q.message.reply_text(f"🎬 Memulai cerita baru dengan {name}...")
+        loading_msg = await q.message.reply_text(f"🎬 Memulai skenario baru bersama {name}...")
         
-        # Prompt awal yang menggunakan deskripsi karakter agar AI gak ngawur
+        # Prompt diperketat untuk struktur: Narasi Suasana -> Dialog
         prompt_awal = (
-            f"Mulai sebuah cerita RomCom baru. Fokus pada pertemuan atau interaksi pertama dengan {name}. "
-            f"Deskripsi karakter {name}: {desc}. "
-            "Tulis sekitar 1000 karakter dengan dialog yang intens."
+            f"Tulis pembukaan cerita RomCom. "
+            f"STRUKTUR WAJIB: \n"
+            f"1. Awali dengan 1 paragraf narasi deskriptif tentang lokasi, waktu, dan suasana (vibe) saat itu. \n"
+            f"2. Lanjutkan dengan dialog interaktif yang panjang dan mendalam antara aku dan {name}. \n"
+            f"KONTEKS: Deskripsi {name} adalah {desc}. \n"
+            f"TARGET: Sekitar 1000 karakter, gaya bahasa natural/gaul."
         )
+        
+        # History kosong [] agar benar-benar fresh
+        out = await generate_response(prompt_awal, [], True)
+        
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            new_history = [f"[STORY]:\n{out}"]
+            await save(uid, {"history": new_history})
+            
+            # Tampilkan 1 blok terbaru (Narasi + Dialog + ABCD)
+            await tampilkan_blok_terbaru(uid, context, {"history": new_history})
         
         # Kita kirim history KOSONG [] karena ini cerita baru
         out = await generate_response(prompt_awal, [], True)
