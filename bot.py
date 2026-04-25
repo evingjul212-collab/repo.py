@@ -197,7 +197,11 @@ async def callback(update, context):
         
         # Gunakan edit_message_text agar menu karakter tetap rapi di satu tempat
         await q.edit_message_text(teks_tampilan, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-
+        #=================================
+    elif q.data == "save_manual":
+        # Kunci user ke step simpan agar pesan teks selanjutnya dianggap sebagai nama slot
+        await save(uid, {"step": "save_manual_step"})
+        await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
     elif q.data.startswith("edit_"):
         idx = q.data.split("_")[1]; await save(uid, {"step": f"editname_{idx}"})
         await q.message.reply_text("Masukkan Nama Baru:")
