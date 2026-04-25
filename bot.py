@@ -118,11 +118,29 @@ async def msg(update, context):
 async def callback(update, context):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
 
-    if q.data == "lanjut":
-        out = await generate_response("Lanjutkan alur sekitar 1000 karakter.", s["history"], True)
+   elif q.data == "lanjut":
+        # 1. Kasih tanda loading biar Boss gak nunggu tanpa kepastian
+        loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens (±1000 karakter)...")
+        
+        # 2. Prompt diperketat: Dialog dominan + Panjang Teks + Opsi ABCD
+        prompt_lanjut = (
+            "Lanjutkan alur cerita dengan dialog yang sangat dominan dan emosional. "
+            "Tulis teks yang panjangnya SEKITAR 1000 KARAKTER. "
+            "Pastikan interaksi antar karakter terasa hidup."
+        )
+        
+        # 3. CRITICAL: Parameter ketiga HARUS 'True' agar muncul ABCD
+        out = await generate_response(prompt_lanjut, s["history"], True) 
+        
         if out:
-            s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
-            await q.message.reply_text(f"--- NEXT ---\n\n{out}", reply_markup=await menu_utama(uid))
+            # Hapus pesan loading setelah AI beres mikir
+            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            
+            s["history"].append(f"[STORY]:\n{out}")
+            await save(uid, {"history": s["history"]})
+            
+            # 4. Tampilkan 2 blok (Blok lama + Blok 1000 karakter baru dengan ABCD)
+            await tampilkan_dua_blok(uid, context, s)
 
     elif q.data == "list_all":
         kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
