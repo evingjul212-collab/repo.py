@@ -48,28 +48,32 @@ async def tampilkan_blok_terbaru(uid, context, s):
     
     # Kirim pesan baru + Menu Utama
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
-# --- ENGINE AI ---
-async def generate_response(prompt, history, force_options=False):
-    system = (
-        "Kamu adalah Penulis Novel Visual RomCom yang ahli dalam dialog interaktif. "
-        "TUGAS: Tulis cerita SEKITAR 1000 karakter. "
-        "GAYA: Perbanyak dialog antar karakter (Gunakan tanda kutip), buat emosional. "
-        "NARASI: Gunakan narasi hanya untuk aksi fisik singkat. "
-        "KARAKTER: Gunakan bahasa gaul/natural."
-    )
-    if force_options:
-        system += " WAJIB akhiri narasi dengan 4 pilihan aksi: A, B, C, D."
-    
-    context = "[KONTEKS]\n" + "\n".join(history[-3:]) if history else ""
-    full_prompt = f"{system}\n\n{context}\n\n[INPUT]\n{prompt}"
-
-    for m in MODELS:
-        try:
-            loop = asyncio.get_event_loop()
-            resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
-            return resp.text.strip()
-        except: continue
-    return None
+#=================================
+# --- ENGINE AI --- generator
+elif q.data == "new_start":
+        idx = s.get("selected", -1)
+        # Karakter target yang dipilih Boss
+        target_name = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        
+        loading_msg = await q.message.reply_text("🎬 Menyiapkan suasana...")
+        
+        prompt_awal = (
+            f"Mulai cerita baru. Awali dengan narasi suasana lokasi dan waktu. "
+            f"Fokus interaksi antara {s['name']} dengan {target_name}. "
+            f"Cari NPC lain dari daftar yang relevan dengan situasi ini (misal pembantu jika di rumah)."
+        )
+        
+        # GENERATE CUKUP 1 KALI SAJA DISINI
+        out = await generate_response(prompt_awal, [], s, True)
+        
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            # SIMPAN CUKUP 1 KALI
+            new_h = [f"[STORY]:\n{out}"]
+            await save(uid, {"history": new_h})
+            await tampilkan_blok_terbaru(uid, context, {"history": new_h})
 
 # --- MENU UTAMA ---
 async def menu_utama(uid):
@@ -220,59 +224,32 @@ async def callback(update, context):
             await q.message.reply_text("✅ LOAD SUCCESS!")
             await tampilkan_dua_blok(uid, context, s_new)
     #=====================================================        
+    # new story
     elif q.data == "new_start":
         idx = s.get("selected", -1)
-        name = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        desc = s.get("desc_utama") if idx == -1 else s["chars"][idx].get("desc")
+        # Karakter target yang dipilih Boss
+        target_name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         
-        loading_msg = await q.message.reply_text(f"🎬 Memulai skenario baru...")
+        loading_msg = await q.message.reply_text("🎬 Menyiapkan suasana...")
         
         prompt_awal = (
-            f"Awali cerita RomCom dengan narasi suasana lokasi dan waktu yang detail. "
-            f"Lalu masuk ke dialog intens dengan {name} ({desc}). "
-            f"TARGET: ±1000 karakter."
+            f"Mulai cerita baru. Awali dengan narasi suasana lokasi dan waktu. "
+            f"Fokus interaksi antara {s['name']} dengan {target_name}. "
+            f"Cari NPC lain dari daftar yang relevan dengan situasi ini (misal pembantu jika di rumah)."
         )
         
-        # HANYA SATU KALI GENERATE
-        out = await generate_response(prompt_awal, [], True)
+        # GENERATE CUKUP 1 KALI SAJA DISINI
+        out = await generate_response(prompt_awal, [], s, True)
         
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
             
-            # HANYA SATU KALI SIMPAN
-            new_history = [f"[STORY]:\n{out}"]
-            await save(uid, {"history": new_history})
-            
-            # HANYA SATU KALI TAMPIL
-            await tampilkan_blok_terbaru(uid, context, {"history": new_history})
-        
-        # History kosong [] agar benar-benar fresh
-        out = await generate_response(prompt_awal, [], True)
-        
-        if out:
-            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            except: pass
-            
-            new_history = [f"[STORY]:\n{out}"]
-            await save(uid, {"history": new_history})
-            
-            # Tampilkan 1 blok terbaru (Narasi + Dialog + ABCD)
-            await tampilkan_blok_terbaru(uid, context, {"history": new_history})
-        
-        # Kita kirim history KOSONG [] karena ini cerita baru
-        out = await generate_response(prompt_awal, [], True)
-        
-        if out:
-            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            except: pass
-            
-            # Simpan sebagai riwayat pertama di database (menghapus riwayat lama)
-            new_history = [f"[STORY]:\n{out}"]
-            await save(uid, {"history": new_history})
-            
-            # Tampilkan hasilnya
-            await tampilkan_blok_terbaru(uid, context, {"history": new_history})        
+            # SIMPAN CUKUP 1 KALI
+            new_h = [f"[STORY]:\n{out}"]
+            await save(uid, {"history": new_h})
+            await tampilkan_blok_terbaru(uid, context, {"history": new_h})        
+           #====================================================        
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo":
         if s["history"]:
@@ -292,9 +269,7 @@ async def callback(update, context):
         if not s["history"]:
             await q.message.reply_text("❌ Tidak ada cerita untuk di-regen!")
             return
-
         loading_msg = await q.message.reply_text("🔄 Menulis ulang cerita terakhir...")
-        
         # 1. Hapus cerita terakhir yang dianggap jelek dari history
         s["history"].pop()
         
@@ -305,7 +280,6 @@ async def callback(update, context):
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
-            
             s["history"].append(f"[STORY]:\n{out}")
             await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
