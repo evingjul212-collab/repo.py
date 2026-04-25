@@ -40,15 +40,16 @@ async def save(uid, data):
 
 # --- ENGINE AI ---
 async def generate_response(prompt, history, force_options=False):
-    system = ("Penulis RomCom RPG. Fokus interaksi manis."
-             "Kamu adalah Penulis Novel Visual RomCom yang ahli dalam dialog interaktif. "
-                 "TUGAS: Tulis cerita minimal 1000 karakter. "
-                 "GAYA: Perbanyak dialog antar karakter (Gunakan tanda kutip), buat emosional dan sedikit nakal/lucu. "
-                 "NARASI: Gunakan narasi hanya untuk aksi fisik atau suasana singkat. "
-                  "KARAKTER: Gunakan bahasa gaul/natural.")
+    system = (
+        "Kamu adalah Penulis Novel Visual RomCom yang ahli dalam dialog interaktif. "
+        "TUGAS: Tulis cerita SEKITAR 1000 karakter. "
+        "GAYA: Perbanyak dialog antar karakter (Gunakan tanda kutip), buat emosional. "
+        "NARASI: Gunakan narasi hanya untuk aksi fisik singkat. "
+        "KARAKTER: Gunakan bahasa gaul/natural."
+    )
     if force_options:
         system += " WAJIB akhiri narasi dengan 4 pilihan aksi: A, B, C, D."
-                
+    
     context = "[KONTEKS]\n" + "\n".join(history[-3:]) if history else ""
     full_prompt = f"{system}\n\n{context}\n\n[INPUT]\n{prompt}"
 
@@ -60,7 +61,7 @@ async def generate_response(prompt, history, force_options=False):
         except: continue
     return None
 
-# --- MENU UTAMA (STANDAR BOSS) ---
+# --- MENU UTAMA ---
 async def menu_utama(uid):
     kb = [
         [InlineKeyboardButton("📜 Karakter", callback_data="list_all")], 
@@ -75,6 +76,18 @@ async def menu_utama(uid):
     ]
     return InlineKeyboardMarkup(kb)
 
+# --- FUNGSI TAMPILKAN 2 BLOK ---
+async def tampilkan_dua_blok(uid, context, s):
+    history = s.get("history", [])
+    if len(history) >= 2:
+        teks = f"{history[-2]}\n\n{'-'*20}\n\n{history[-1]}"
+    elif len(history) == 1:
+        teks = history[-1]
+    else:
+        teks = "📖 Belum ada cerita. Mulailah petualanganmu!"
+    
+    await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
+
 # --- HANDLER PESAN TEKS ---
 async def msg(update, context):
     uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
@@ -83,7 +96,6 @@ async def msg(update, context):
         await save(uid, {"name": text.capitalize(), "step": None})
         await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid)); return
 
-    # Proses Edit (Nama -> Deskripsi)
     if s["step"] and s["step"].startswith("editname_"):
         idx = int(s["step"].split("_")[1])
         await save(uid, {"temp_val": text, "step": f"editdesc_{idx}"})
@@ -112,43 +124,27 @@ async def msg(update, context):
         out = await generate_response(f"Pilih {text.upper()}", s["history"], True)
         if out:
             s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
-            await update.message.reply_text(f"--- STORY ---\n\n{out}", reply_markup=await menu_utama(uid)); return
+            await tampilkan_dua_blok(uid, context, s); return
 
 # --- HANDLER TOMBOL ---
 async def callback(update, context):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
 
-    elif q.data == "lanjut":
-        # 1. Kasih tanda loading biar Boss gak nunggu tanpa kepastian
+    if q.data == "lanjut": # PERBAIKAN: Gunakan 'if' bukan 'elif' di awal
         loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens (±1000 karakter)...")
-        
-        # 2. Prompt diperketat: Dialog dominan + Panjang Teks + Opsi ABCD
-        prompt_lanjut = (
-            "Lanjutkan alur cerita dengan dialog yang sangat dominan dan emosional. "
-            "Tulis teks yang panjangnya SEKITAR 1000 KARAKTER. "
-            "Pastikan interaksi antar karakter terasa hidup."
-        )
-        
-        # 3. CRITICAL: Parameter ketiga HARUS 'True' agar muncul ABCD
+        prompt_lanjut = "Lanjutkan alur cerita dengan dialog emosional dominan, sekitar 1000 karakter."
         out = await generate_response(prompt_lanjut, s["history"], True) 
-        
         if out:
-            # Hapus pesan loading setelah AI beres mikir
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            
-            s["history"].append(f"[STORY]:\n{out}")
-            await save(uid, {"history": s["history"]})
-            
-            # 4. Tampilkan 2 blok (Blok lama + Blok 1000 karakter baru dengan ABCD)
+            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
             await tampilkan_dua_blok(uid, context, s)
 
     elif q.data == "list_all":
         kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
         for i, c in enumerate(s["chars"]): 
             kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
-        kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), 
-                   InlineKeyboardButton("⬅️ Menu Utama", callback_data="main_menu")])
-        await q.edit_message_text("Daftar Karakter Terdeteksi:", reply_markup=InlineKeyboardMarkup(kb))
+        kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
+        await q.edit_message_text("Daftar Karakter:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1]); await save(uid, {"selected": idx})
@@ -160,82 +156,39 @@ async def callback(update, context):
         await q.edit_message_text(f"Karakter: {name}", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("edit_"):
-        idx = q.data.split("_")[1]
-        await save(uid, {"step": f"editname_{idx}"})
+        idx = q.data.split("_")[1]; await save(uid, {"step": f"editname_{idx}"})
         await q.message.reply_text("Masukkan Nama Baru:")
-
-    elif q.data == "new_start":
-        idx = s.get("selected", -1); name = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        out = await generate_response("Mulai pertemuan baru.", [], True)
-        if out:
-            await save(uid, {"history": [f"[{name}]: {out}"]})
-            await q.message.reply_text(f"--- NEW STORY ---\n\n{out}", reply_markup=await menu_utama(uid))
-
-    elif q.data == "save_manual":
-        await save(uid, {"step": "save_manual_step"}); await q.message.reply_text("Ketik nama save slot:")
 
     elif q.data == "load_list":
         items = await archives.find({"user_id": uid}).sort("_id", -1).to_list(10)
         kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load_{i['_id']}")] for i in items]
-        kb.append([InlineKeyboardButton("⬅️ Menu Utama", callback_data="main_menu")])
+        kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
         await q.edit_message_text("Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("load_"):
         data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
         if data:
-            history = data.get("history", [])
-            # Sinkronisasi data ke state aktif
-            await save(uid, {
-                "history": history,
-                "chars": data.get("chars", []),
-                "name": data.get("name"),
-                "step": None
-            })
-            
-            # --- LOGIKA TAMPILKAN 1 BLOK CERITA ---
-            if history:
-                pesan_terakhir = history[-1] # Ambil baris paling akhir di history
-                teks_tampilan = f"✅ **GAME LOADED**\n\nRiwayat Terakhir:\n{pesan_terakhir}"
-            else:
-                teks_tampilan = "✅ **GAME LOADED**\n\n(Belum ada riwayat cerita di slot ini)"
-
-            # Kirim pesan cerita terakhir + Menu Utama
-            await q.message.reply_text(teks_tampilan, reply_markup=await menu_utama(uid))
+            s_new = {"history": data.get("history", []), "chars": data.get("chars", []), "name": data.get("name"), "step": None}
+            await save(uid, s_new)
+            await q.message.reply_text("✅ LOAD SUCCESS!")
+            await tampilkan_dua_blok(uid, context, s_new)
 
     elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
     elif q.data == "undo" and s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Back.")
     elif q.data == "main_menu": await q.edit_message_text("Menu Utama:", reply_markup=await menu_utama(uid))
     elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
 
-# --- FUNGSI START ---
+# --- START ---
 async def start(update: Update, context):
     uid = update.effective_user.id
     await save(uid, {"step": "set_name", "history": [], "chars": []}) 
     await update.message.reply_text("Siapa namamu?")
-#==========================
-# funsi tetap tampilkan cerita 
-async def tampilkan_dua_blok(uid, context, s):
-    history = s.get("history", [])
-    if len(history) >= 2:
-        # Ambil 2 terakhir
-        teks = f"{history[-2]}\n\n{history[-1]}"
-    elif len(history) == 1:
-        teks = history[-1]
-    else:
-        teks = "📖 Belum ada cerita. Mulailah petualanganmu!"
-    
-    # Kirim sebagai PESAN BARU (bukan edit) agar tidak hilang
-    await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
-# --- BAGIAN RUNNING ---
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
-    
     loop = asyncio.get_event_loop()
     loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
-    
-    print("✅ Bot sudah diperbaiki dan siap jalan!")
     app.run_polling(drop_pending_updates=True)
