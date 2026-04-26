@@ -152,7 +152,30 @@ async def msg(update, context):
         if out:
             s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
             await tampilkan_dua_blok(uid, context, s); return
-
+#============================
+# 🎭 Narator"
+    if s["step"] == "narator_input":
+        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+        
+        # Jika history kosong, ini pembukaan. Jika tidak, ini kelanjutan.
+        is_new = len(s["history"]) == 0
+        prompt_narator = (
+            f"Bertindaklah sebagai Narator. Berdasarkan arahan user: '{text}', "
+            f"{'buatlah pembukaan cerita yang mendalam' if is_new else 'lanjutkan alur cerita yang sudah ada'}. "
+            f"Fokus pada narasi suasana dan deskripsi lokasi. Target ±1000 karakter."
+        )
+        
+        # Panggil AI (Parameter s tetap disertakan untuk data NPC)
+        out = await generate_response(prompt_narator, s["history"], s, True)
+        
+        if out:
+            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            s["history"].append(f"[NARRATOR]:\n{out}")
+            await save(uid, {"history": s["history"], "step": None})
+            
+            # Tampilkan hasilnya
+            await tampilkan_blok_terbaru(uid, context, s)
+        return
 # --- HANDLER TOMBOL ---
 async def callback(update, context):
     q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
@@ -277,6 +300,7 @@ async def callback(update, context):
         await save(uid, {"step": "save_manual_step"})
         await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
 #==#======================================================================================
+# 🎭 **Narator 
     elif q.data == "step_narator":
         if not s["history"]:
             # Jika cerita masih kosong
