@@ -30,8 +30,10 @@ def fix_state(s):
         "desc_utama": s.get("desc_utama", "Tokoh Utama"),
         "step": s.get("step"),
         "history": s.get("history", []),
-        "chars": s.get("chars", []),
+        "chars": s.get("chars", []), # Nanti di sini tiap NPC punya field 'mood'
         "selected": s.get("selected", -1),
+        "world_state": s.get("world_state", {"time": "Pagi", "location": "Rumah", "turn": 0}), # [Update No 3]
+        "summary": s.get("summary", ""), # [Update No 4]
         "temp_val": s.get("temp_val")
     }
 
@@ -73,24 +75,35 @@ async def tampilkan_dua_blok(uid, context, s):
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
 # =================================================================
-# [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
+# [4] AI CORE ENGINE - UPGRADE LEVEL (MOOD, TIME, MEMORY)
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
-    info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
-    daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
+    # Ambil info waktu dan lokasi
+    waktu = s["world_state"]["time"]
+    lokasi = s["world_state"]["location"]
+    
+    # Ambil NPC yang lagi diajak ngobrol (kalau ada)
+    idx = s.get("selected", -1)
+    npc_info = ""
+    if idx != -1:
+        npc = s["chars"][idx]
+        # Definisikan mood (default 50 kalau belum ada)
+        mood = npc.get("mood", 50) 
+        npc_info = f"NPC SAAT INI: {npc['name']} (Mood: {mood}/100)."
     
     system = (
-        f"Kamu adalah Penulis Novel Visual RomCom.\n"
-        f"DATA DUNIA (Hanya untuk referensi penulis):\n"
-        f"{info_utama}\n"
-        f"DAFTAR NPC: \n{daftar_npc}\n\n"
-        "ATURAN KETAT INTERAKSI (ANTI-META):\n"
-        "1. NPC HANYA boleh tahu informasi yang diucapkan secara langsung dalam dialog atau yang mereka alami sendiri.\n"
-        "2. NPC DILARANG KERAS mengetahui rahasia Tokoh Utama atau NPC lain yang hanya ada di dalam 'Deskripsi' atau riwayat masa lalu yang tidak mereka saksikan.\n"
-        "3. JANGAN biarkan NPC membongkar plot atau rahasia karakter lain kecuali ada adegan pembongkaran rahasia secara eksplisit di riwayat cerita.\n"
-        "4. Bertindaklah seolah-olah setiap NPC memiliki ingatan terbatas hanya pada kejadian yang melibatkan mereka.\n"
-        "5. Tulis cerita ±1000 karakter, dialog natural, narasi suasana di awal."
+        f"Kamu adalah Penulis Novel Visual Dewasa/RomCom.\n"
+        f"RINGKASAN CERITA LALU: {s.get('summary', 'Baru dimulai')}\n"
+        f"DUNIA SAAT INI: {waktu} di {lokasi}.\n"
+        f"{npc_info}\n\n"
+        "ATURAN LEVEL UP:\n"
+        "1. MOOD & LOVE: NPC hanya akan merespon godaan/ajakan bercinta jika Mood > 80 DAN lokasi bersifat privat (seperti Kamar atau Rumah) DAN waktu Malam.\n"
+        "2. Jika Mood < 40, NPC akan bersikap dingin atau marah.\n"
+        "3. Jika waktu Malam, suasana harus lebih romantis atau tegang.\n"
+        "4. KONSISTENSI: Baca ringkasan cerita agar tidak lupa kejadian penting sebelumnya.\n"
+        "5. Tulis cerita ±1000 karakter dengan narasi suasana yang menggoda dan dialog intens."
     )
+    # ... (sisanya sama seperti sebelumnya)
     
     if force_options:
         system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
@@ -278,7 +291,17 @@ async def callback(update, context):
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
             s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
+#======================
+# 7,5==========================
 
+async def update_summary(uid, s):
+    if len(s["history"]) > 10:
+        p = f"Buat ringkasan super singkat (1 paragraf) dari riwayat ini agar poin penting tidak terlupa: \n" + "\n".join(s["history"])
+        # Panggil AI khusus buat ngerangkum
+        summary = await generate_response(p, [], s, False)
+        if summary:
+            # Simpan summary dan kosongkan history lama agar enteng (Context Management)
+            await save(uid, {"summary": summary, "history": s["history"][-3:]})
 # =================================================================
 # [8] MAIN RUNNER (POLLING) - FIX CONFLICT ERROR
 # =================================================================
