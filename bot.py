@@ -276,8 +276,19 @@ async def callback(update, context):
     elif q.data == "save_manual":
         await save(uid, {"step": "save_manual_step"})
         await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
-#========================================================================================
-# 🔄 Regen
+#==#======================================================================================
+    elif q.data == "step_narator":
+        if not s["history"]:
+            # Jika cerita masih kosong
+            await save(uid, {"step": "narator_input"})
+            await q.message.reply_text("🎭 **Narator Mode**\n\nCerita masih kosong. Silakan ketik **Alur Cerita Awal** yang kamu inginkan (Lokasi, suasana, atau kejadian pembuka):")
+        else:
+            # Jika cerita sudah ada isinya
+            await save(uid, {"step": "narator_input"})
+            await q.message.reply_text("🎭 **Narator Mode**\n\nCerita sudah berjalan. Silakan ketik **Alur Selanjutnya** yang ingin kamu tambahkan dalam narasi:")
+#===================
+    # 🔄 Regen
+#==================
     elif q.data == "regen":
         if not s["history"]:
             await q.message.reply_text("❌ Tidak ada cerita untuk di-regen!")
