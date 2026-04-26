@@ -141,7 +141,6 @@ async def msg(update, context):
         return
 
     if s["step"] == "action":
-        if s["step"] == "action":
         # TAMBAHKAN 's' sebelum 'False'
         out = await generate_response(f"Aksi {tag}: {text}", s["history"], s, False)
         if out:
@@ -167,6 +166,9 @@ async def callback(update, context):
             s["history"].append(f"[STORY]:\n{out}"); 
             await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
+#===============================
+#  📜 Karakter"
+#===============================
     elif q.data == "list_all":
         kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
         for i, c in enumerate(s["chars"]): 
