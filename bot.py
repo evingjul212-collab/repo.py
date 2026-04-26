@@ -73,30 +73,29 @@ async def tampilkan_dua_blok(uid, context, s):
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
 # =================================================================
-# [4] AI CORE ENGINE (GENERATOR) - PERBAIKAN ANTI-HALU
+# [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
-    # Gabungkan semua info karakter agar AI punya "Buku Panduan Dunia"
     info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
     
     system = (
-        f"Kamu adalah Penulis Novel Visual RomCom yang sangat teliti.\n"
-        f"DATA KARAKTER WAJIB (Haram dilanggar):\n"
+        f"Kamu adalah Penulis Novel Visual RomCom.\n"
+        f"DATA DUNIA (Hanya untuk referensi penulis):\n"
         f"{info_utama}\n"
         f"DAFTAR NPC: \n{daftar_npc}\n\n"
-        "ATURAN KETAT:\n"
-        "1. JANGAN memunculkan karakter baru yang tidak ada di DAFTAR NPC.\n"
-        "2. JANGAN mengarang latar belakang keluarga/pasangan jika tidak disebutkan di deskripsi.\n"
-        "3. Konsisten pada sifat dan pekerjaan yang tertulis di deskripsi.\n"
-        "4. Tulis cerita ±1000 karakter, dialog dominan, narasi suasana di awal."
-        )
+        "ATURAN KETAT INTERAKSI (ANTI-META):\n"
+        "1. NPC HANYA boleh tahu informasi yang diucapkan secara langsung dalam dialog atau yang mereka alami sendiri.\n"
+        "2. NPC DILARANG KERAS mengetahui rahasia Tokoh Utama atau NPC lain yang hanya ada di dalam 'Deskripsi' atau riwayat masa lalu yang tidak mereka saksikan.\n"
+        "3. JANGAN biarkan NPC membongkar plot atau rahasia karakter lain kecuali ada adegan pembongkaran rahasia secara eksplisit di riwayat cerita.\n"
+        "4. Bertindaklah seolah-olah setiap NPC memiliki ingatan terbatas hanya pada kejadian yang melibatkan mereka.\n"
+        "5. Tulis cerita ±1000 karakter, dialog natural, narasi suasana di awal."
+    )
     
     if force_options:
         system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
     
-    # Tetap kirim history agar nyambung, tapi system prompt di atas akan jadi 'jangkar'-nya
-    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
+    context = "[RIWAYAT CERITA SEBELUMNYA]\n" + "\n".join(history[-3:]) if history else "Cerita baru dimulai."
     full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
 
     for m in MODELS:
@@ -106,7 +105,6 @@ async def generate_response(prompt, history, s, force_options=False):
             return resp.text.strip()
         except: continue
     return None
-
 # =================================================================
 # [5] KEYBOARD MENUS
 # =================================================================
