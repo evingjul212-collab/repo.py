@@ -61,22 +61,29 @@ async def tampilkan_dua_blok(uid, context, s):
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
 # =================================================================
-# [4] AI CORE ENGINE (GENERATOR)
+# [4] AI CORE ENGINE (GENERATOR) - PERBAIKAN ANTI-HALU
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
+    # Gabungkan semua info karakter agar AI punya "Buku Panduan Dunia"
+    info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
+    
     system = (
-        f"Kamu adalah Penulis Novel Visual RomCom.\n"
-        f"TOKOH UTAMA: {s['name']} ({s.get('desc_utama', '')})\n"
-        f"DAFTAR NPC YANG TERSEDIA:\n{daftar_npc}\n\n"
-        "TUGAS: Tulis cerita ±1000 karakter. Gunakan NPC yang relevan dari daftar di atas. "
-        "Jika setting di rumah, gunakan NPC yang bekerja di rumah (seperti pembantu). "
-        "GAYA: Dialog dominan, narasi suasana di awal. Bahasa gaul natural."
-    )
+        f"Kamu adalah Penulis Novel Visual RomCom yang sangat teliti.\n"
+        f"DATA KARAKTER WAJIB (Haram dilanggar):\n"
+        f"{info_utama}\n"
+        f"DAFTAR NPC: \n{daftar_npc}\n\n"
+        "ATURAN KETAT:\n"
+        "1. JANGAN memunculkan karakter baru yang tidak ada di DAFTAR NPC.\n"
+        "2. JANGAN mengarang latar belakang keluarga/pasangan jika tidak disebutkan di deskripsi.\n"
+        "3. Konsisten pada sifat dan pekerjaan yang tertulis di deskripsi.\n"
+        "4. Tulis cerita ±1000 karakter, dialog dominan, narasi suasana di awal."
+        )
     
     if force_options:
         system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
     
+    # Tetap kirim history agar nyambung, tapi system prompt di atas akan jadi 'jangkar'-nya
     context = "[RIWAYAT CERITA SEBELUMNYA]\n" + "\n".join(history[-3:]) if history else "Cerita baru dimulai."
     full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
 
