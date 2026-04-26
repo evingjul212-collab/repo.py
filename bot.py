@@ -152,6 +152,29 @@ async def msg(update, context):
         if out:
             s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
             await tampilkan_dua_blok(uid, context, s); return
+    # STEP 1: Menangkap Nama NPC
+    if s["step"] == "add_npc_name":
+        await save(uid, {"temp_val": text, "step": "add_npc_desc"})
+        await update.message.reply_text(f"Nama: **{text}**\n\nSekarang masukkan **Deskripsi** NPC tersebut (Sifat, pekerjaan, atau hubungannya denganmu):")
+        return
+    #====================
+    # ➕ Tambah NPC
+    # STEP 2: Menangkap Deskripsi & Simpan ke List NPC
+    if s["step"] == "add_npc_desc":
+        new_npc = {"name": s["temp_val"], "desc": text}
+        
+        # Ambil list NPC lama, tambahkan yang baru
+        daftar_npc = s.get("chars", [])
+        daftar_npc.append(new_npc)
+        
+        # Simpan permanen ke DB
+        await save(uid, {"chars": daftar_npc, "step": None, "temp_val": None})
+        
+        await update.message.reply_text(
+            f"✅ NPC **{new_npc['name']}** berhasil ditambahkan ke daftar!", 
+            reply_markup=await menu_utama(uid)
+        )
+        return
 #============================
 # 🎭 Narator"
     if s["step"] == "narator_input":
@@ -189,6 +212,13 @@ async def callback(update, context):
             s["history"].append(f"[STORY]:\n{out}"); 
             await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
+#======================
+#👤 **Tambah NPC Baru**
+#======================
+    elif q.data == "add_npc":
+        # Set step agar pesan selanjutnya ditangkap sebagai Nama NPC
+        await save(uid, {"step": "add_npc_name"})
+        await q.message.reply_text("👤 **Tambah NPC Baru**\n\nMasukkan **Nama** NPC yang ingin ditambahkan:")
 #===============================
 #  📜 Karakter"
 #===============================
