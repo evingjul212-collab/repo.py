@@ -95,7 +95,7 @@ async def generate_response(prompt, history, s, force_options=False):
     if force_options:
         system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
     
-    context = "[RIWAYAT CERITA SEBELUMNYA]\n" + "\n".join(history[-3:]) if history else "Cerita baru dimulai."
+    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
     full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
 
     for m in MODELS:
@@ -280,7 +280,7 @@ async def callback(update, context):
             s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
 
 # =================================================================
-# [8] MAIN RUNNER (POLLING)
+# [8] MAIN RUNNER (POLLING) - FIX CONFLICT ERROR
 # =================================================================
 async def start(update: Update, context):
     uid = update.effective_user.id
@@ -289,9 +289,30 @@ async def start(update: Update, context):
 
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Handler tetap sama
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
-    app.run_polling(drop_pending_updates=True)
+    
+    # --- LOGIKA ANTI CONFLICT ---
+    async def main():
+        # 1. Hapus webhook dan drop pesan yang pending (biar bot gak kaget pas nyala)
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Koneksi lama dibersihkan. Memulai polling...")
+        
+        # 2. Jalankan polling
+        async with app:
+            await app.initialize()
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)
+            
+            # Biar bot tetap nyala terus
+            while True:
+                await asyncio.sleep(1000)
+
+    # Jalankan dengan loop utama
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("👋 Bot dimatikan.")
