@@ -84,7 +84,7 @@ async def generate_response(prompt, history, s, force_options=False):
         system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
     
     # Tetap kirim history agar nyambung, tapi system prompt di atas akan jadi 'jangkar'-nya
-    context = "[RIWAYAT CERITA SEBELUMNYA]\n" + "\n".join(history[-3:]) if history else "Cerita baru dimulai."
+    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
     full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
 
     for m in MODELS:
