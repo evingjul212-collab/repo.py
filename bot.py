@@ -235,13 +235,47 @@ async def callback(update, context):
         await q.message.reply_text("📋 **Daftar Karakter:**", reply_markup=InlineKeyboardMarkup(kb))
 
     # --- TOMBOL: DETAIL KARAKTER (SELECTED) ---
+    # --- TOMBOL: DETAIL KARAKTER (SELECTED) ---
     elif q.data.startswith("sel_"):
-        idx = int(q.data.split("_")[1]); await save(uid, {"selected": idx})
+        idx = int(q.data.split("_")[1])
+        await save(uid, {"selected": idx})
+        
+        # Ambil Data Karakter
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
         desc = s.get("desc_utama") if idx == -1 else s["chars"][idx].get("desc")
-        kb = [[InlineKeyboardButton("🎮 Aksi", callback_data="act_run")], [InlineKeyboardButton("🎬 New Story", callback_data="new_start")], [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")], [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]]
-        await q.edit_message_text(f"👤 **Detail Karakter**\n━━━━━━━━━━━━━━━\n📛 **Nama:** {name}\n📖 **Deskripsi:**\n{desc}", reply_markup=InlineKeyboardMarkup(kb))
+        
+        # Indikator Mood (Hanya untuk NPC)
+        if idx != -1:
+            mood = s["chars"][idx].get("mood", 50)
+            heart_icons = "❤️" * (mood // 20) + "🤍" * (5 - (mood // 20))
+            status_mood = f"{heart_icons} ({mood}/100)"
+        else:
+            status_mood = "🌟 (Pemain Utama)"
 
+        # Susun Pesan (Lebih Minimalis)
+        teks_tampilan = (
+            f"👤 **PROFIL KARAKTER**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📛 **Nama:** {name}\n"
+            f"🎭 **Role:** {'Tokoh Utama' if idx == -1 else 'NPC'}\n"
+            f"💓 **Mood:** {status_mood}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📖 **Deskripsi:**\n_{desc}_\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ *Tips: Mood > 80 di malam hari membuka interaksi spesial.*"
+        )
+
+        kb = [
+            [InlineKeyboardButton("🎮 Aksi", callback_data="act_run")],
+            [InlineKeyboardButton("🎬 New Story", callback_data="new_start")],
+            [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]
+        ]
+        
+        try:
+            await q.edit_message_text(teks_tampilan, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        except:
+            await q.message.reply_text(teks_tampilan, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
     # --- TOMBOL: SAVE/LOAD/EDIT ---
     elif q.data == "save_manual": await save(uid, {"step": "save_manual_step"}); await q.message.reply_text("💾 Ketik nama Save Slot:")
     elif q.data.startswith("edit_"): idx = q.data.split("_")[1]; await save(uid, {"step": f"editname_{idx}"}); await q.message.reply_text("Masukkan Nama Baru:")
