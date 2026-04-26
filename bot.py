@@ -276,7 +276,8 @@ async def callback(update, context):
     elif q.data == "save_manual":
         await save(uid, {"step": "save_manual_step"})
         await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
-  #========================================================================================
+#========================================================================================
+# 🔄 Regen
     elif q.data == "regen":
         if not s["history"]:
             await q.message.reply_text("❌ Tidak ada cerita untuk di-regen!")
@@ -287,7 +288,7 @@ async def callback(update, context):
         
         # 2. Ambil prompt terakhir (AI akan baca konteks sisa history)
         # Kita minta AI lanjutin lagi seolah-olah yang jelek tadi gak pernah ada
-        out = await generate_response("Ulangi bagian terakhir dengan alur yang lebih menarik, ±1000 karakter.", s["history"], True)
+        out = await generate_response("Ulangi bagian terakhir dengan alur yang lebih menarik, ±1000 karakter.", s["history"], s, True)
         
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
