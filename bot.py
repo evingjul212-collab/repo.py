@@ -148,7 +148,7 @@ async def msg(update, context):
             await update.message.reply_text(f"--- {tag} ---\n\n{out}", reply_markup=await menu_utama(uid)); return
 
     if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
-        out = await generate_response(f"Pilih {text.upper()}", s["history"], True)
+        out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
         if out:
             s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
             await tampilkan_dua_blok(uid, context, s); return
