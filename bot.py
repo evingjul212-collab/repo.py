@@ -141,8 +141,9 @@ async def msg(update, context):
         return
 
     if s["step"] == "action":
-        idx = s.get("selected", -1); tag = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        out = await generate_response(f"Aksi {tag}: {text}", s["history"], False)
+        if s["step"] == "action":
+        # TAMBAHKAN 's' sebelum 'False'
+        out = await generate_response(f"Aksi {tag}: {text}", s["history"], s, False)
         if out:
             s["history"].append(f"[{tag}]: {out}"); await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(f"--- {tag} ---\n\n{out}", reply_markup=await menu_utama(uid)); return
@@ -273,7 +274,7 @@ async def callback(update, context):
     elif q.data == "save_manual":
         await save(uid, {"step": "save_manual_step"})
         await q.message.reply_text("💾 **Simpan Progress**\n\nKetik nama untuk Save Slot ini:")
-
+  #========================================================================================
     elif q.data == "regen":
         if not s["history"]:
             await q.message.reply_text("❌ Tidak ada cerita untuk di-regen!")
