@@ -284,10 +284,10 @@ async def callback(update, context):
         kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load_{i['_id']}")] for i in items]
         kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
         await q.edit_message_text("Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
-# =================================================================
+    # =================================================================
 # FIX LOAD: BISA BACA DATA MANUAL / COPY-PASTE
 # =================================================================
-elif q.data.startswith("load_"):
+    elif q.data.startswith("load_"):
     save_id_str = q.data.split("_")[1]
     
     # Coba cari pakai format ObjectId dulu, kalau gagal cari pakai String biasa
