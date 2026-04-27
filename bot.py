@@ -17,7 +17,7 @@ MODELS = ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"]
 client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client_db.game_db
 users = db.user_states
-archives = db.archives 
+archives = db.datsa
 
 # =================================================================
 # [2] DATA MANAGEMENT (SAVE/GET STATE)
