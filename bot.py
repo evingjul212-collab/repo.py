@@ -288,15 +288,15 @@ async def callback(update, context):
 # FIX LOAD: BISA BACA DATA MANUAL / COPY-PASTE
 # =================================================================
     elif q.data.startswith("load_"):
-    save_id_str = q.data.split("_")[1]
+        save_id_str = q.data.split("_")[1]
     
     # Coba cari pakai format ObjectId dulu, kalau gagal cari pakai String biasa
-    try:
+        try:
         data_save = await archives.find_one({"_id": ObjectId(save_id_str)})
-    except:
+        except:
         data_save = await archives.find_one({"_id": save_id_str})
 
-    if data_save:
+        if data_save:
         # Gunakan fix_state agar data yang kurang lengkap (akibat copy manual) diisi default
         data_siap = fix_state(data_save)
         
@@ -306,7 +306,7 @@ async def callback(update, context):
         await save(uid, data_siap)
         await q.message.reply_text(f"✅ Berhasil memuat simpanan: {data_save.get('save_name', 'Tanpa Nama')}")
         await tampilkan_dua_blok(uid, context, data_siap)
-    else:
+        else:
         await q.message.reply_text("❌ Waduh, filenya gak ketemu atau rusak, Boss!")
 
     # --- TOMBOL: NEW STORY (LOGIKA NPC EKSKLUSIF) ---
