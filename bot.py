@@ -319,7 +319,7 @@ async def update_summary(uid, s):
 async def start(update: Update, context):
     uid = update.effective_user.id
     await save(uid, {"step": "set_name", "history": [], "chars": []}) 
-    await update.message.reply_text("Siapa namamu?")
+    await update.message.reply_text("ini versi baru, Siapa namamu?")
 
 if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
