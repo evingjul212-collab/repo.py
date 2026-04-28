@@ -75,30 +75,41 @@ async def tampilkan_dua_blok(uid, context, s):
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
 # =================================================================
-# [4] AI CORE ENGINE
+# [4] AI CORE ENGINE - FIX DESKRIPSI & KONSISTENSI
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
     waktu = s["world_state"]["time"]
     lokasi = s["world_state"]["location"]
     
+    # Ambil deskripsi tokoh utama
+    desc_user = s.get("desc_utama", "Tidak ada deskripsi.")
+    nama_user = s.get("name", "User")
+    
+    # Ambil informasi NPC yang sedang dipilih (jika ada)
     idx = s.get("selected", -1)
     npc_info = ""
     if idx != -1:
         npc = s["chars"][idx]
         mood = npc.get("mood", 50) 
-        npc_info = f"NPC SAAT INI: {npc['name']} (Mood: {mood}/100)."
+        desc_npc = npc.get("desc", "Tidak ada deskripsi.")
+        npc_info = f"NPC AKTIF: {npc['name']} (Mood: {mood}/100). Deskripsi NPC: {desc_npc}"
+    
+    # Gabungkan semua info karakter sebagai panduan AI
+    info_karakter = (
+        f"DATA KARAKTER UTAMA:\n- Nama: {nama_user}\n- Latar Belakang: {desc_user}\n\n"
+        f"{npc_info}"
+    )
     
     system = (
-        f"Kamu adalah Penulis Novel Visual Dewasa/RomCom.\n"
+        f"Kamu adalah Penulis Novel Visual Dewasa/RomCom yang sangat teliti.\n"
+        f"PANDUAN KARAKTER (WAJIB DIPATUHI):\n{info_karakter}\n\n"
         f"RINGKASAN CERITA LALU: {s.get('summary', 'Baru dimulai')}\n"
-        f"DUNIA SAAT INI: {waktu} di {lokasi}.\n"
-        f"{npc_info}\n\n"
-        "ATURAN LEVEL UP:\n"
-        "1. MOOD & LOVE: NPC hanya akan merespon godaan/ajakan bercinta jika Mood > 80 DAN lokasi bersifat privat (seperti Kamar atau Rumah) DAN waktu Malam.\n"
-        "2. Jika Mood < 40, NPC akan bersikap dingin atau marah.\n"
-        "3. Jika waktu Malam, suasana harus lebih romantis atau tegang.\n"
-        "4. KONSISTENSI: Baca ringkasan cerita agar tidak lupa kejadian penting sebelumnya.\n"
-        "5. Tulis cerita ±1000 karakter dengan narasi suasana yang menggoda dan dialog intens."
+        f"DUNIA SAAT INI: {waktu} di {lokasi}.\n\n"
+        "ATURAN PENULISAN:\n"
+        "1. KONSISTENSI TOTAL: Jangan memunculkan karakter atau latar belakang yang bertentangan dengan DATA KARAKTER di atas.\n"
+        "2. MOOD & LOVE: Respon romantis hanya jika Mood > 80, lokasi privat, dan malam hari.\n"
+        "3. GAYA BAHASA: Gunakan narasi yang menggoda, deskriptif, dan dialog intens ±1000 karakter.\n"
+        "4. Jika ada instruksi khusus, prioritaskan logika dunia yang sudah ditetapkan."
     )
     
     if force_options:
