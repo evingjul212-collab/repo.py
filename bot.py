@@ -81,35 +81,28 @@ async def generate_response(prompt, history, s, force_options=False):
     waktu = s["world_state"]["time"]
     lokasi = s["world_state"]["location"]
     
-    # Ambil deskripsi tokoh utama
-    desc_user = s.get("desc_utama", "Tidak ada deskripsi.")
+    # AMBIL DATA DESKRIPSI (Kunci agar tidak halusinasi)
     nama_user = s.get("name", "User")
+    desc_user = s.get("desc_utama", "Tidak ada deskripsi.")
     
-    # Ambil informasi NPC yang sedang dipilih (jika ada)
     idx = s.get("selected", -1)
     npc_info = ""
     if idx != -1:
         npc = s["chars"][idx]
         mood = npc.get("mood", 50) 
         desc_npc = npc.get("desc", "Tidak ada deskripsi.")
-        npc_info = f"NPC AKTIF: {npc['name']} (Mood: {mood}/100). Deskripsi NPC: {desc_npc}"
-    
-    # Gabungkan semua info karakter sebagai panduan AI
-    info_karakter = (
-        f"DATA KARAKTER UTAMA:\n- Nama: {nama_user}\n- Latar Belakang: {desc_user}\n\n"
-        f"{npc_info}"
-    )
+        npc_info = f"NPC SAAT INI: {npc['name']} (Mood: {mood}/100). Deskripsi NPC: {desc_npc}"
     
     system = (
-        f"Kamu adalah Penulis Novel Visual Dewasa/RomCom yang sangat teliti.\n"
-        f"PANDUAN KARAKTER (WAJIB DIPATUHI):\n{info_karakter}\n\n"
+        f"Kamu adalah Penulis Novel Visual Dewasa/RomCom.\n"
+        f"DATA TOKOH UTAMA ({nama_user}): {desc_user}\n" # Pastikan ini terkirim
+        f"{npc_info}\n\n"
         f"RINGKASAN CERITA LALU: {s.get('summary', 'Baru dimulai')}\n"
         f"DUNIA SAAT INI: {waktu} di {lokasi}.\n\n"
-        "ATURAN PENULISAN:\n"
-        "1. KONSISTENSI TOTAL: Jangan memunculkan karakter atau latar belakang yang bertentangan dengan DATA KARAKTER di atas.\n"
-        "2. MOOD & LOVE: Respon romantis hanya jika Mood > 80, lokasi privat, dan malam hari.\n"
-        "3. GAYA BAHASA: Gunakan narasi yang menggoda, deskriptif, dan dialog intens ±1000 karakter.\n"
-        "4. Jika ada instruksi khusus, prioritaskan logika dunia yang sudah ditetapkan."
+        "ATURAN KONSISTENSI:\n"
+        "1. DILARANG memunculkan karakter yang tidak ada dalam deskripsi tokoh utama (misal: jika orang tua di luar kota, jangan munculkan di dapur).\n"
+        "2. MOOD & LOVE: NPC hanya merespon jika Mood > 80, lokasi privat, dan malam hari.\n"
+        "3. Tulis cerita ±1000 karakter dengan narasi menggoda dan dialog intens."
     )
     
     if force_options:
