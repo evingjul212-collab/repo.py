@@ -70,6 +70,24 @@ async def tampilkan_dua_blok(uid, context, s):
         if len(teks) > 4000: teks = teks[:3900] + "..." 
         
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
+    # =================================================================
+# [4] MOOD SYSTEM
+# =================================================================
+def update_mood(s, text):
+    idx = s.get("selected", -1)
+    if idx == -1 or idx >= len(s["chars"]):
+        return s
+
+    npc = s["chars"][idx]
+    mood = npc.get("mood", 50)
+
+    if any(w in text.lower() for w in ["baik","tolong","ramah"]):
+        mood += 5
+    if any(w in text.lower() for w in ["kasar","marah","hina"]):
+        mood -= 5
+
+    npc["mood"] = max(0, min(100, mood))
+    return s
 
 # =================================================================
 # [4] AI CORE ENGINE - UPGRADE LEVEL (MOOD, TIME, MEMORY)
