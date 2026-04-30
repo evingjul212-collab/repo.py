@@ -88,7 +88,21 @@ async def update_mood(s, text):
 
     npc["mood"] = max(0, min(100, mood))
     return s
+# =================================================================
+# [3] WORLD SYSTEM
+# =================================================================
+def update_world(s):
+    ws = s["world_state"]
+    ws["turn"] += 1
 
+    if ws["turn"] % 6 == 0:
+        ws["time"] = "Malam"
+    elif ws["turn"] % 3 == 0:
+        ws["time"] = "Sore"
+    else:
+        ws["time"] = "Pagi"
+
+    return ws
 # =================================================================
 # [4] AI CORE ENGINE - UPGRADE LEVEL (MOOD, TIME, MEMORY)
 # =================================================================
@@ -129,6 +143,17 @@ async def generate_response(prompt, history, s, force_options=False):
             return resp.text.strip()
         except: continue
     return None
+# =================================================================
+# [5] MEMORY SYSTEM
+# =================================================================
+def update_memory(s, text):
+    if "memory" not in s:
+        s["memory"] = []
+
+    if any(k in text.lower() for k in ["jatuh","hilang","janji","cinta","temukan"]):
+        s["memory"].append(text[:120])
+
+    return s
 
 # =================================================================
 # [5] KEYBOARD MENUS
@@ -221,6 +246,15 @@ async def msg(update, context):
             await save(uid, {"history": s["history"], "step": None})
             await tampilkan_blok_terbaru(uid, context, s)
         return
+# =================================================================
+# [7] SUMMARY
+# =================================================================
+async def update_summary(uid, s):
+    if len(s["history"]) > 8:
+        p = "Ringkas cerita:\n" + "\n".join(s["history"])
+        summary = await generate_response(p, [], s, False)
+        if summary:
+            await save(uid, {"summary": summary, "history": s["history"][-4:]})
 
 # =================================================================
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
