@@ -401,6 +401,17 @@ async def update_summary(uid, s):
         summary = await generate_response(p, [], s, False)
         if summary:
             await save(uid, {"summary": summary, "history": s["history"][-3:]})
+# =================================================================
+# [8] APPLY STATE UPDATE (IMPORTANT)
+# =================================================================
+async def apply_updates(uid, s, text=""):
+    s = update_mood(s, text)
+    s = update_memory(s, s["history"][-1])
+    s["world_state"] = update_world(s)
+    await update_summary(uid, s)
+    await save(uid, s)
+    return s
+
 
 # =================================================================
 # [8] MAIN RUNNER (POLLING)
