@@ -225,7 +225,7 @@ async def callback(update, context):
             "chars": s["chars"],
             "world_state": s["world_state"],
             "summary": s.get("summary", "")
-            A})
+            })
 
             await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
