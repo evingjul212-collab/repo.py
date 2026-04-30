@@ -224,7 +224,7 @@ async def callback(update, context):
             "history": s["history"],
             "chars": s["chars"],
             "world_state": s["world_state"],
-A            "summary": s.get("summary", "")
+            "summary": s.get("summary", "")
             A})
 
             await save(uid, {"history": s["history"]})
@@ -239,7 +239,7 @@ A            "summary": s.get("summary", "")
         for i, c in enumerate(s["chars"]): kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
         kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
         await q.message.reply_text("📋 **Daftar Karakter:**", reply_markup=InlineKeyboardMarkup(kb))
-A
+
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1])
         await save(uid, {"selected": idx})
