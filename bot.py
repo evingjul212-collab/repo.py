@@ -327,16 +327,16 @@ async def callback(update, context):
             except: pass
             s["history"].append(f"[STORY]:\n{out}"); 
             s = update_mood(s, text if 'text' in locals() else "")
-s = update_memory(s, s["history"][-1])
-s["world_state"] = update_world(s)
-await update_summary(uid, s)
-await save(uid, {
-    "history": s["history"],
-    "chars": s["chars"],
-    "world_state": s["world_state"],
-    "memory": s.get("memory", []),
-    "summary": s.get("summary", "")
-})
+            s = update_memory(s, s["history"][-1])
+            s["world_state"] = update_world(s)
+            await update_summary(uid, s)
+            await save(uid, {
+            "history": s["history"],
+            "chars": s["chars"],
+            "world_state": s["world_state"],
+            "memory": s.get("memory", []),
+            "summary": s.get("summary", "")
+            })
 
             await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
 
