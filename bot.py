@@ -370,7 +370,7 @@ if __name__ == "__main__":
         async with app:
             await app.initialize()
             await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)A
+            await app.updater.start_polling(drop_pending_updates=True)
             while True: await asyncio.sleep(1000)
 
     try:
