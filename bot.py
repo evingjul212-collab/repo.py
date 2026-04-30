@@ -73,7 +73,7 @@ async def tampilkan_dua_blok(uid, context, s):
     # =================================================================
 # [4] MOOD SYSTEM
 # =================================================================
-def update_mood(s, text):
+async def update_mood(s, text):
     idx = s.get("selected", -1)
     if idx == -1 or idx >= len(s["chars"]):
         return s
