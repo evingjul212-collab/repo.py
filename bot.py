@@ -188,6 +188,18 @@ async def msg(update, context):
         if out:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             s["history"].append(f"[NARRATOR]:\n{out}")
+            s = update_mood(s, text if 'text' in locals() else "")
+s = update_memory(s, s["history"][-1])
+s["world_state"] = update_world(s)
+await update_summary(uid, s)
+await save(uid, {
+    "history": s["history"],
+    "chars": s["chars"],
+    "world_state": s["world_state"],
+    "memory": s.get("memory", []),
+    "summary": s.get("summary", "")
+})
+
             await save(uid, {"history": s["history"], "step": None})
             await tampilkan_blok_terbaru(uid, context, s)
         return
@@ -203,7 +215,20 @@ async def callback(update, context):
         out = await generate_response("Lanjutkan alur cerita, ±1000 karakter.", s["history"], s, True) 
         if out:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
+            s["history"].append(f"[STORY]:\n{out}");
+            s = update_mood(s, text if 'text' in locals() else "")
+s = update_memory(s, s["history"][-1])
+s["world_state"] = update_world(s)
+await update_summary(uid, s)
+await save(uid, {
+    "history": s["history"],
+    "chars": s["chars"],
+    "world_state": s["world_state"],
+    "memory": s.get("memory", []),
+    "summary": s.get("summary", "")
+})
+
+            await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
 
     elif q.data == "add_npc":
@@ -301,7 +326,20 @@ async def callback(update, context):
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
+            s["history"].append(f"[STORY]:\n{out}"); 
+            s = update_mood(s, text if 'text' in locals() else "")
+s = update_memory(s, s["history"][-1])
+s["world_state"] = update_world(s)
+await update_summary(uid, s)
+await save(uid, {
+    "history": s["history"],
+    "chars": s["chars"],
+    "world_state": s["world_state"],
+    "memory": s.get("memory", []),
+    "summary": s.get("summary", "")
+})
+
+            await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
 
 # =================================================================
 # [7.5] CONTEXT MANAGEMENT
