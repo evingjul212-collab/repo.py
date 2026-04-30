@@ -189,16 +189,16 @@ async def msg(update, context):
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             s["history"].append(f"[NARRATOR]:\n{out}")
             s = update_mood(s, text if 'text' in locals() else "")
-s = update_memory(s, s["history"][-1])
-s["world_state"] = update_world(s)
-await update_summary(uid, s)
-await save(uid, {
-    "history": s["history"],
-    "chars": s["chars"],
-    "world_state": s["world_state"],
-    "memory": s.get("memory", []),
-    "summary": s.get("summary", "")
-})
+            s = update_memory(s, s["history"][-1])
+            s["world_state"] = update_world(s)
+            await update_summary(uid, s)
+            await save(uid, {
+            "history": s["history"],
+            "chars": s["chars"],
+            "world_state": s["world_state"],
+            "memory": s.get("memory", []),
+            "summary": s.get("summary", "")
+            })
 
             await save(uid, {"history": s["history"], "step": None})
             await tampilkan_blok_terbaru(uid, context, s)
@@ -371,7 +371,7 @@ if __name__ == "__main__":
         async with app:
             await app.initialize()
             await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
+            await app.updater.start_polling(drop_pending_updates=True)A
             while True: await asyncio.sleep(1000)
 
     try:
