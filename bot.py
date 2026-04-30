@@ -1,210 +1,342 @@
-import os
-import json
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
-import google.generativeai as genai
-from groq import Groq
-import io
+import os 
+import asyncio
+import re 
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from motor.motor_asyncio import AsyncIOMotorClient
+from google import genai
+from bson import ObjectId 
 
-# ==========================================
-# KODE: ROMKOM ENGINE V.32.3 - ROLEPLAY OPTIMIZED
-# Deskripsi: 70% DIALOG, 30% NARASI, FIXED IMPORT
-# ==========================================
-
-# --- CONFIG ---
+# =================================================================
+# [1] CONFIG & DATABASE CONNECTION
+# =================================================================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-GROQ_KEY = os.getenv("GROQ_API_KEY")
+client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+MODELS = ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"]
 
-genai.configure(api_key=GEMINI_KEY)
-groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
-bot = telebot.TeleBot(BOT_TOKEN)
+client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
+db = client_db.game_db
+users = db.user_states
+archives = db.datsa
 
-DB_FILE = "experimental_db.json"
+# =================================================================
+# [2] DATA MANAGEMENT (SAVE/GET STATE)
+# =================================================================
+def fix_state(s):
+    if not s: s = {}
+    return {
+        "_id": s.get("_id"),
+        "name": s.get("name", "User"),
+        "desc_utama": s.get("desc_utama", "Tokoh Utama"),
+        "step": s.get("step"),
+        "history": s.get("history", []),
+        "chars": s.get("chars", []), # Nanti di sini tiap NPC punya field 'mood'
+        "selected": s.get("selected", -1),
+        "world_state": s.get("world_state", {"time": "Pagi", "location": "Rumah", "turn": 0}), 
+        "summary": s.get("summary", ""), 
+        "temp_val": s.get("temp_val")
+    }
 
-# Instruksi Dasar dengan Rasio Dialog/Narasi
-SYSTEM_INSTRUCTION = """Kamu AI GM RomCom 21+. RESPON WAJIB 2 PARAGRAF. Gaya Indonesia kasual, sensual, puitis. 
-ATURAN FORMAT:
-1. Jika Karakter beraksi: Wajib 70% Dialog interaksi dan 30% Narasi situasi/tindakan.
-2. Jika Narator beraksi: Wajib 100% Narasi suasana, situasi, dan perasaan tanpa dialog.
-3. Gunakan tanda kutip "..." untuk setiap percakapan. 
-4. ANTI-REPETISI."""
+async def get_state(uid):
+    s = await users.find_one({"_id": uid})
+    return fix_state(s)
 
-# --- FUNGSI DATA (ASLI & AMAN) ---
-def load_db():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, 'r') as f: return json.load(f)
-        except: return {}
-    return {}
+async def save(uid, data):
+    await users.update_one({"_id": uid}, {"$set": data}, upsert=True)
 
-def save_db(db):
-    with open(DB_FILE, 'w') as f: json.dump(db, f, indent=4)
-
-def serialize_history(history):
-    return [{"role": e.role, "parts": [e.parts[0].text]} for e in history if hasattr(e, 'parts')]
-
-# --- UI RENDERER ---
-def render_main_menu(chat_id, text, prefix=""):
-    db = load_db(); cid = str(chat_id)
-    if cid not in db: return
+# =================================================================
+# [3] UI HELPERS (MESSAGE RENDERING) - FIX MESSAGE TOO LONG
+# =================================================================
+async def tampilkan_blok_terbaru(uid, context, s):
+    history = s.get("history", [])
+    teks = history[-1] if history else "📖 Belum ada cerita. Mulailah petualanganmu!"
     
-    m = InlineKeyboardMarkup()
-    curr_m = db[cid].get("current_model", "gemini-2.5-flash")
-    
-    # 1. Baris Karakter
-    chars = db[cid].get("characters", {})
-    char_btns = [InlineKeyboardButton(f"🎭 {n}", callback_data=f"select_{n}") for n in chars.keys()]
-    for i in range(0, len(char_btns), 2):
-        m.row(*char_btns[i:i+2])
+    if len(teks) > 4000:
+        teks = teks[:3900] + "...\n\n(Teks terpotong karena terlalu panjang)"
         
-    # 2. Baris Kontrol
-    m.row(InlineKeyboardButton("🎙️ Narator", callback_data="select_Narator"),
-          InlineKeyboardButton("➕ Tambah Karakter", callback_data="action_add_char"))
-    
-    # 3. Baris Navigasi
-    m.row(InlineKeyboardButton("▶️ AI Lanjut", callback_data="action_lanjut"), 
-          InlineKeyboardButton("🔄 Ulang Narasi", callback_data="retry"))
-    
-    # 4. Model & Reset
-    l_g = "✅ G2.5" if "gemini" in curr_m else "🌟 G2.5"
-    l_l = "✅ Llama" if "llama" in curr_m else "🚀 Llama"
-    m.row(InlineKeyboardButton(l_g, callback_data="set_g25"),
-          InlineKeyboardButton(l_l, callback_data="set_llama"))
-    m.add(InlineKeyboardButton("🗑️ Hapus Semua Karakter", callback_data="action_clear_cast"))
-    
-    model_disp = "Gemini 2.5-Flash" if "gemini" in curr_m else "Llama 3.3-70B"
-    footer = f"\n\n---\n🤖 *Model: {model_disp}*"
-    
-    msg = f"{prefix}\n\n{text}{footer}" if prefix else f"{text}{footer}"
-    try:
-        bot.send_message(chat_id, msg, reply_markup=m, parse_mode="Markdown")
-    except:
-        bot.send_message(chat_id, msg, reply_markup=m)
+    await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
-# --- ENGINE (OPTIMIZED PROMPT) ---
-def execute_engine(chat_id, user_input, is_retry=False):
-    cid = str(chat_id); db = load_db()
-    bot.send_chat_action(cid, 'typing')
-    
-    if not isinstance(db[cid].get("history"), list):
-        db[cid]["history"] = []
-    
-    m_now = db[cid].get("current_model", "gemini-2.5-flash")
-    if is_retry and len(db[cid]["history"]) >= 1:
-        db[cid]["history"].pop()
-    
-    prompt = db[cid].get("last_input", "Lanjutkan narasinya.") if is_retry else user_input
-    db[cid]["last_input"] = prompt
-
-    # Injeksi Profil Karakter
-    char_data = db[cid].get("characters", {})
-    profiles = "\n\nKONSISTENSI KARAKTER:\n"
-    for n, d in char_data.items():
-        if isinstance(d, dict):
-            profiles += f"- {n}: {d.get('bio','-')}. Sifat: {d.get('sifat','-')}. Kebiasaan: {d.get('habit','-')}\n"
-    
-    # Deteksi Role Aktif
-    active_char = db[cid].get("active_char", "Narator")
-    if active_char == "Narator":
-        role_instr = "\nFOKUS: Kamu adalah Narator. Berikan narasi 100% suasana dan situasi tanpa dialog."
+async def tampilkan_dua_blok(uid, context, s):
+    history = s.get("history", [])
+    if len(history) >= 2:
+        teks = f"{history[-2]}\n\n{'-'*20}\n\n{history[-1]}"
+    elif len(history) == 1:
+        teks = history[-1]
     else:
-        role_instr = f"\nFOKUS: Kamu adalah {active_char}. Berikan 70% dialog percakapan dan 30% narasi tindakan."
+        teks = "📖 Belum ada cerita. Mulailah petualanganmu!"
+    
+    if len(teks) > 4000:
+        teks = f"(Cerita sebelumnya disembunyikan karena terlalu panjang)\n\n{'-'*20}\n\n{history[-1]}"
+        if len(teks) > 4000: teks = teks[:3900] + "..." 
+        
+    await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
 
-    final_instr = SYSTEM_INSTRUCTION + profiles + role_instr
+# =================================================================
+# [4] AI CORE ENGINE - UPGRADE LEVEL (MOOD, TIME, MEMORY)
+# =================================================================
+async def generate_response(prompt, history, s, force_options=False):
+    waktu = s["world_state"]["time"]
+    lokasi = s["world_state"]["location"]
+    
+    idx = s.get("selected", -1)
+    npc_info = ""
+    if idx != -1:
+        npc = s["chars"][idx]
+        mood = npc.get("mood", 50) 
+        npc_info = f"NPC SAAT INI: {npc['name']} (Mood: {mood}/100)."
+    
+    system = (
+        f"Kamu adalah Penulis Novel Visual Dewasa/RomCom.\n"
+        f"RINGKASAN CERITA LALU: {s.get('summary', 'Baru dimulai')}\n"
+        f"DUNIA SAAT INI: {waktu} di {lokasi}.\n"
+        f"{npc_info}\n\n"
+        "ATURAN LEVEL UP:\n"
+        "1. MOOD & LOVE: NPC hanya akan merespon godaan/ajakan bercinta jika Mood > 80 DAN lokasi bersifat privat (seperti Kamar atau Rumah) DAN waktu Malam.\n"
+        "2. Jika Mood < 40, NPC akan bersikap dingin atau marah.\n"
+        "3. Jika waktu Malam, suasana harus lebih romantis atau tegang.\n"
+        "4. KONSISTENSI: Baca ringkasan cerita agar tidak lupa kejadian penting sebelumnya.\n"
+        "5. Tulis cerita ±1000 karakter dengan narasi suasana yang menggoda dan dialog intens."
+    )
+    
+    if force_options:
+        system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
+    
+    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
+    full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
 
-    try:
-        model = genai.GenerativeModel(model_name=m_now, system_instruction=final_instr)
-        chat = model.start_chat(history=db[cid]["history"][-12:])
-        res_t = chat.send_message(prompt).text
-        db[cid]["history"] = serialize_history(chat.history)
-        save_db(db)
-        render_main_menu(cid, res_t)
-    except Exception as e:
-        render_main_menu(cid, f"⚠️ Error: {str(e)}", prefix="❌ **FAILURE**")
-
-# --- HANDLERS ---
-@bot.message_handler(commands=['start', 'new', 'reset'])
-def welcome(message):
-    cid = str(message.chat.id); db = load_db()
-    db[cid] = {"history": [], "current_model": "gemini-2.5-flash", "characters": {}, "step": "playing"}
-    save_db(db)
-    bot.send_message(cid, "🎮 **ROMKOM ENGINE V.32.3**\nKetik Premis Awal Cerita:")
-
-@bot.message_handler(commands=['import'])
-def cmd_import(message):
-    cid = str(message.chat.id); db = load_db()
-    db[cid]["step"] = "waiting_file"; save_db(db)
-    bot.send_message(cid, "📂 **Kirim file JSON kamu!**")
-
-@bot.message_handler(commands=['export'])
-def cmd_export(message):
-    cid = str(message.chat.id); db = load_db()
-    if cid in db:
-        bio = io.BytesIO(json.dumps(db[cid], indent=4).encode('utf-8'))
-        bio.name = f"story_{cid}.json"
-        bot.send_document(cid, bio, caption="💾 Backup Cerita Berhasil.")
-
-@bot.message_handler(content_types=['document'])
-def handle_docs(message):
-    cid = str(message.chat.id); db = load_db()
-    if db.get(cid, {}).get("step") == "waiting_file":
+    for m in MODELS:
         try:
-            raw = bot.download_file(bot.get_file(message.document.file_id).file_path)
-            db[cid] = json.loads(raw); db[cid]["step"] = "playing"; save_db(db)
-            last_msg = "📂 **IMPORT SUKSES**\nSila lanjut bercerita."
-            if "history" in db[cid]:
-                for h in reversed(db[cid]["history"]):
-                    if h.get("role") == "model":
-                        last_msg = h["parts"][0]; break
-            render_main_menu(cid, last_msg)
-        except: bot.reply_to(message, "❌ Gagal!")
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
+            return resp.text.strip()
+        except: continue
+    return None
 
-@bot.message_handler(func=lambda m: True)
-def main_text_handler(message):
-    cid = str(message.chat.id); db = load_db()
-    if cid not in db: return
-    step = db[cid].get("step")
-    if step == "waiting_file": return
+# =================================================================
+# [5] KEYBOARD MENUS
+# =================================================================
+async def menu_utama(uid):
+    kb = [
+        [InlineKeyboardButton("📜 Karakter", callback_data="list_all")], 
+        [InlineKeyboardButton("🎭 Narator", callback_data="step_narator"), 
+         InlineKeyboardButton("⏩ Lanjut", callback_data="lanjut")], 
+        [InlineKeyboardButton("💾 Save Slot", callback_data="save_manual"), 
+         InlineKeyboardButton("📂 Load Slot", callback_data="load_list")], 
+        [InlineKeyboardButton("📖 Riwayat", callback_data="show_history"), 
+         InlineKeyboardButton("↩️ Back", callback_data="undo")], 
+        [InlineKeyboardButton("🔄 Regen", callback_data="regen"), 
+         InlineKeyboardButton("🧹 Reset", callback_data="reset_confirm")] 
+    ]
+    return InlineKeyboardMarkup(kb)
 
-    if step == "add_name":
-        db[cid]["temp_char"] = message.text.strip().capitalize()
-        db[cid]["step"] = "add_bio"; save_db(db)
-        bot.send_message(cid, f"📝 **Relasi {db[cid]['temp_char']}:**")
-    elif step == "add_bio":
-        db[cid]["temp_bio"] = message.text; db[cid]["step"] = "add_sifat"; save_db(db)
-        bot.send_message(cid, "✨ **Sifat:**")
-    elif step == "add_sifat":
-        db[cid]["temp_sifat"] = message.text; db[cid]["step"] = "add_habit"; save_db(db)
-        bot.send_message(cid, "🚬 **Kebiasaan:**")
-    elif step == "add_habit":
-        name = db[cid].pop("temp_char")
-        db[cid]["characters"][name] = {"bio":db[cid].pop("temp_bio"), "sifat":db[cid].pop("temp_sifat"), "habit":message.text}
-        db[cid]["step"] = "playing"; save_db(db)
-        render_main_menu(cid, f"✅ {name} Siap!")
-    elif db[cid].get("waiting_char_input"):
-        char = db[cid].get("active_char", "Narator")
-        db[cid]["waiting_char_input"] = False; save_db(db)
-        execute_engine(cid, f"[{char} melakukan]: {message.text}")
-    else:
-        execute_engine(cid, message.text)
+# =================================================================
+# [6] TEXT MESSAGE HANDLER (LOGIC BY STEP)
+# =================================================================
+async def msg(update, context):
+    uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
 
-@bot.callback_query_handler(func=lambda call: True)
-def cb_handler(call):
-    cid = str(call.message.chat.id); db = load_db()
-    if call.data == "retry": execute_engine(cid, "", is_retry=True)
-    elif call.data == "action_add_char":
-        db[cid]["step"] = "add_name"; save_db(db); bot.send_message(cid, "👤 **Nama Karakter:**")
-    elif call.data.startswith("select_"):
-        db[cid]["active_char"] = call.data.replace("select_", ""); db[cid]["waiting_char_input"] = True; save_db(db)
-        bot.send_message(cid, f"🎭 **Aksi {db[cid]['active_char']}:**")
-    elif call.data == "action_lanjut": execute_engine(cid, "Lanjutkan narasi otomatis.")
-    elif call.data.startswith("set_"):
-        v = call.data.replace("set_", ""); m_map = {"g25":"gemini-2.5-flash", "llama":"llama-3.3-70b-versatile"}
-        db[cid]["current_model"] = m_map.get(v); save_db(db); render_main_menu(cid, f"Model ganti: {v}")
-    elif call.data == "action_clear_cast":
-        db[cid]["characters"] = {}; save_db(db); render_main_menu(cid, "Cast dikosongkan.")
+    if s["step"] == "set_name":
+        await save(uid, {"name": text.capitalize(), "step": None})
+        await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid)); return
+
+    if s["step"] and s["step"].startswith("editname_"):
+        idx = int(s["step"].split("_")[1])
+        await save(uid, {"temp_val": text, "step": f"editdesc_{idx}"})
+        await update.message.reply_text(f"Nama baru: {text}. Sekarang masukkan DESKRIPSI baru:"); return
+    
+    if s["step"] and s["step"].startswith("editdesc_"):
+        idx = int(s["step"].split("_")[1])
+        if idx == -1: s["name"], s["desc_utama"] = s["temp_val"], text
+        else: s["chars"][idx]["name"], s["chars"][idx]["desc"] = s["temp_val"], text
+        await save(uid, {"name": s["name"], "desc_utama": s["desc_utama"], "chars": s["chars"], "step": None, "temp_val": None})
+        await update.message.reply_text("✨ Karakter diperbarui!", reply_markup=await menu_utama(uid)); return
+
+    if s["step"] == "save_manual_step":
+        save_data = {"user_id": uid, "save_name": text, "history": s["history"], "chars": s["chars"], "name": s["name"], "desc_utama": s.get("desc_utama", "Tokoh Utama")}
+        await archives.insert_one(save_data)
+        await save(uid, {"step": None})
+        await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
+
+    if s["step"] == "action":
+        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
+        out = await generate_response(f"Aksi {tag}: {text}", s["history"], s, False)
+        if out:
+            s["history"].append(f"[{tag}]: {out}"); await save(uid, {"history": s["history"], "step": None})
+            await update.message.reply_text(f"--- {tag} ---\n\n{out}", reply_markup=await menu_utama(uid)); return
+
+    if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
+        out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
+        if out:
+            s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
+            await tampilkan_dua_blok(uid, context, s); return
+
+    if s["step"] == "add_npc_name":
+        await save(uid, {"temp_val": text, "step": "add_npc_desc"})
+        await update.message.reply_text(f"Nama: **{text}**\n\nSekarang masukkan **Deskripsi** NPC tersebut:"); return
+
+    if s["step"] == "add_npc_desc":
+        new_npc = {"name": s["temp_val"], "desc": text}
+        s["chars"].append(new_npc)
+        await save(uid, {"chars": s["chars"], "step": None, "temp_val": None})
+        await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
+
+    if s["step"] == "narator_input":
+        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+        is_new = len(s["history"]) == 0
+        prompt_narator = f"Bertindaklah sebagai Narator. Arahan: '{text}', {'buat pembukaan' if is_new else 'lanjutkan alur'}. Target ±1000 karakter."
+        out = await generate_response(prompt_narator, s["history"], s, True)
+        if out:
+            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            s["history"].append(f"[NARRATOR]:\n{out}")
+            await save(uid, {"history": s["history"], "step": None})
+            await tampilkan_blok_terbaru(uid, context, s)
+        return
+
+# =================================================================
+# [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
+# =================================================================
+async def callback(update, context):
+    q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
+
+    if q.data == "lanjut":
+        loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens...")
+        out = await generate_response("Lanjutkan alur cerita, ±1000 karakter.", s["history"], s, True) 
+        if out:
+            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
+            await tampilkan_blok_terbaru(uid, context, s)
+
+    elif q.data == "add_npc":
+        await save(uid, {"step": "add_npc_name"})
+        await q.message.reply_text("👤 **Tambah NPC Baru**\n\nMasukkan **Nama** NPC:")
+
+    elif q.data == "list_all":
+        kb = [[InlineKeyboardButton(f"👤 {s['name']}", callback_data="sel_-1")]]
+        for i, c in enumerate(s["chars"]): kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
+        kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
+        await q.message.reply_text("📋 **Daftar Karakter:**", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data.startswith("sel_"):
+        idx = int(q.data.split("_")[1])
+        await save(uid, {"selected": idx})
+        name = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        desc = s.get("desc_utama") if idx == -1 else s["chars"][idx].get("desc")
+        
+        if idx != -1:
+            mood = s["chars"][idx].get("mood", 50)
+            heart_icons = "❤️" * (mood // 20) + "🤍" * (5 - (mood // 20))
+            status_mood = f"{heart_icons} ({mood}/100)"
+        else:
+            status_mood = "🌟 (Pemain Utama)"
+
+        teks_tampilan = (
+            f"👤 **PROFIL KARAKTER**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📛 **Nama:** {name}\n"
+            f"🎭 **Role:** {'Tokoh Utama' if idx == -1 else 'NPC'}\n"
+            f"💓 **Mood:** {status_mood}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📖 **Deskripsi:**\n_{desc}_\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ *Tips: Mood > 80 di malam hari membuka interaksi spesial.*"
+        )
+
+        kb = [
+            [InlineKeyboardButton("🎮 Aksi", callback_data="act_run")],
+            [InlineKeyboardButton("🎬 New Story", callback_data="new_start")],
+            [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]
+        ]
+        try: await q.edit_message_text(teks_tampilan, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        except: await q.message.reply_text(teks_tampilan, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+    elif q.data == "save_manual": await save(uid, {"step": "save_manual_step"}); await q.message.reply_text("💾 Ketik nama Save Slot:")
+    elif q.data.startswith("edit_"): idx = q.data.split("_")[1]; await save(uid, {"step": f"editname_{idx}"}); await q.message.reply_text("Masukkan Nama Baru:")
+    
+    elif q.data == "load_list":
+        items = await archives.find({"user_id": uid}).sort("_id", -1).to_list(10)
+        kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load_{i['_id']}")] for i in items]
+        kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
+        await q.edit_message_text("Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data.startswith("load_"):
+        save_id_str = q.data.split("_")[1]
+        try:
+            data_save = await archives.find_one({"_id": ObjectId(save_id_str)})
+        except:
+            data_save = await archives.find_one({"_id": save_id_str})
+
+        if data_save:
+            data_siap = fix_state(data_save)
+            data_siap["_id"] = uid 
+            await save(uid, data_siap)
+            await q.message.reply_text(f"✅ Berhasil memuat simpanan: {data_save.get('save_name', 'Tanpa Nama')}")
+            await tampilkan_dua_blok(uid, context, data_siap)
+        else:
+            await q.message.reply_text("❌ Waduh, filenya gak ketemu atau rusak, Boss!")
+
+    elif q.data == "new_start":
+        idx = s.get("selected", -1); loading_msg = await q.message.reply_text("🎬 Menyiapkan skenario...")
+        if idx == -1:
+            prompt = f"Mulai cerita baru POV {s['name']}. Narasi suasana. Pilih HANYA SATU NPC relevan dari daftar. NPC lain dilarang muncul."
+        else:
+            n = s["chars"][idx]["name"]; d = s["chars"][idx].get("desc", "")
+            prompt = f"Mulai cerita baru. Fokus interaksi {s['name']} dengan {n} ({d}). Narasi suasana. DILARANG munculkan NPC lain."
+        out = await generate_response(prompt, [], s, True)
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            new_h = [f"[STORY]:\n{out}"]; await save(uid, {"history": new_h}); await tampilkan_blok_terbaru(uid, context, {"history": new_h})
+
+    elif q.data == "act_run": await save(uid, {"step": "action"}); await q.message.reply_text("Ketik aksi:")
+    elif q.data == "undo":
+        if s["history"]: s["history"].pop(); await save(uid, {"history": s["history"]}); await q.message.reply_text("↩️ Undo."); await tampilkan_blok_terbaru(uid, context, s)
+    elif q.data == "reset_confirm": await save(uid, {"step": "set_name", "history": [], "chars": []}); await q.message.reply_text("Reset! Namamu?")
+    elif q.data == "main_menu": await q.message.reply_text("📱 **Menu Utama:**", reply_markup=await menu_utama(uid))
+    elif q.data == "step_narator": await save(uid, {"step": "narator_input"}); await q.message.reply_text("🎭 Ketik alur cerita (awal/lanjutan):")
+    elif q.data == "regen":
+        if not s["history"]: return
+        loading_msg = await q.message.reply_text("🔄 Menulis ulang...")
+        s["history"].pop(); out = await generate_response("Ulangi adegan terakhir, ±1000 karakter.", s["history"], s, True)
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
+
+# =================================================================
+# [7.5] CONTEXT MANAGEMENT
+# =================================================================
+async def update_summary(uid, s):
+    if len(s["history"]) > 10:
+        p = f"Buat ringkasan super singkat (1 paragraf) dari riwayat ini agar poin penting tidak terlupa: \n" + "\n".join(s["history"])
+        summary = await generate_response(p, [], s, False)
+        if summary:
+            await save(uid, {"summary": summary, "history": s["history"][-3:]})
+
+# =================================================================
+# [8] MAIN RUNNER (POLLING)
+# =================================================================
+async def start(update: Update, context):
+    uid = update.effective_user.id
+    await save(uid, {"step": "set_name", "history": [], "chars": []}) 
+    await update.message.reply_text("ini versi baru, Siapa namamu?")
 
 if __name__ == "__main__":
-    bot.infinity_polling()
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg))
     
+    async def main():
+        await app.bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Koneksi lama dibersihkan. Memulai polling...")
+        async with app:
+            await app.initialize()
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)
+            while True: await asyncio.sleep(1000)
+
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("👋 Bot dimatikan.")
