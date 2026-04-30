@@ -104,45 +104,53 @@ def update_world(s):
 
     return ws
 # =================================================================
-# [4] AI CORE ENGINE - UPGRADE LEVEL (MOOD, TIME, MEMORY)
+# [6] AI ENGINE (FIXED CONSISTENCY)
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
     waktu = s["world_state"]["time"]
     lokasi = s["world_state"]["location"]
-    
+
     idx = s.get("selected", -1)
     npc_info = ""
-    if idx != -1:
+    npc_desc = ""
+
+    if idx != -1 and s["chars"]:
         npc = s["chars"][idx]
-        mood = npc.get("mood", 50) 
-        npc_info = f"NPC SAAT INI: {npc['name']} (Mood: {mood}/100)."
-    
+        npc_info = f"NPC: {npc['name']} (Mood {npc.get('mood',50)})"
+        npc_desc = npc.get("desc","")
+
+    all_chars = "\n".join([f"- {c['name']}: {c.get('desc','')}" for c in s["chars"]])
+    memory = "\n".join(s.get("memory", [])[-5:])
+
     system = (
-        f"Kamu adalah Penulis Novel Visual Dewasa/RomCom.\n"
-        f"RINGKASAN CERITA LALU: {s.get('summary', 'Baru dimulai')}\n"
-        f"DUNIA SAAT INI: {waktu} di {lokasi}.\n"
-        f"{npc_info}\n\n"
-        "ATURAN LEVEL UP:\n"
-        "1. MOOD & LOVE: NPC hanya akan merespon godaan/ajakan bercinta jika Mood > 80 DAN lokasi bersifat privat (seperti Kamar atau Rumah) DAN waktu Malam.\n"
-        "2. Jika Mood < 40, NPC akan bersikap dingin atau marah.\n"
-        "3. Jika waktu Malam, suasana harus lebih romantis atau tegang.\n"
-        "4. KONSISTENSI: Baca ringkasan cerita agar tidak lupa kejadian penting sebelumnya.\n"
-        "5. Tulis cerita ±1000 karakter dengan narasi suasana yang menggoda dan dialog intens."
+        f"Penulis novel interaktif.\n"
+        f"Ringkasan: {s.get('summary','-')}\n"
+        f"Memory: {memory}\n"
+        f"Dunia: {waktu} di {lokasi}\n"
+        f"{npc_info}\n{npc_desc}\n"
+        f"Daftar karakter:\n{all_chars}\n"
+        "WAJIB konsisten dengan deskripsi karakter.\n"
+        "Jika nama disebut, sifat harus sesuai.\n"
+        "Dilarang ubah kepribadian.\n"
+        "Narasi + dialog.\n"
+        "Panjang 800-1000 karakter."
     )
-    
+
     if force_options:
-        system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
-    
-    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
+        system += "\nAkhiri dengan pilihan A B C D"
+
+    context = "\n".join(history[-5:])
+    full_prompt = f"{system}\n\n{context}\n\n{prompt}"
 
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
             return resp.text.strip()
-        except: continue
+        except:
+            continue
     return None
+
 # =================================================================
 # [5] MEMORY SYSTEM
 # =================================================================
