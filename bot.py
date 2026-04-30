@@ -217,16 +217,15 @@ async def callback(update, context):
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             s["history"].append(f"[STORY]:\n{out}");
             s = update_mood(s, text if 'text' in locals() else "")
-s = update_memory(s, s["history"][-1])
-s["world_state"] = update_world(s)
-await update_summary(uid, s)
-await save(uid, {
-    "history": s["history"],
-    "chars": s["chars"],
-    "world_state": s["world_state"],
-    "memory": s.get("memory", []),
-    "summary": s.get("summary", "")
-})
+            s = update_memory(s, s["history"][-1])
+            s["world_state"] = update_world(s)
+            await update_summary(uid, s)
+            await save(uid, {
+            "history": s["history"],
+            "chars": s["chars"],
+            "world_state": s["world_state"],
+A            "summary": s.get("summary", "")
+            A})
 
             await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
@@ -240,7 +239,7 @@ await save(uid, {
         for i, c in enumerate(s["chars"]): kb.append([InlineKeyboardButton(f"👥 {c['name']}", callback_data=f"sel_{i}")])
         kb.append([InlineKeyboardButton("➕ Tambah NPC", callback_data="add_npc"), InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
         await q.message.reply_text("📋 **Daftar Karakter:**", reply_markup=InlineKeyboardMarkup(kb))
-
+A
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1])
         await save(uid, {"selected": idx})
