@@ -140,13 +140,13 @@ async def msg(update, context):
         await update.message.reply_text(f"Halo {s['name']}!", reply_markup=await menu_utama(uid))
         return
 # ================= NARATOR (BALIKIN FITURNYA) =================
-if s["step"] == "narator_input":
-    loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+    if s["step"] == "narator_input":
+        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
-    is_new = len(s["history"]) == 0
-    prompt_narator = f"Bertindak sebagai Narator. Arahan: '{text}', {'buat pembukaan cerita' if is_new else 'lanjutkan cerita'}."
+        is_new = len(s["history"]) == 0
+        prompt_narator = f"Bertindak sebagai Narator. Arahan: '{text}', {'buat pembukaan cerita' if is_new else 'lanjutkan cerita'}."
 
-    out = await generate_response(prompt_narator, s["history"], s, True)
+        out = await generate_response(prompt_narator, s["history"], s, True)
 
     if out:
         try:
