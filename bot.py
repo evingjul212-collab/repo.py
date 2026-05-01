@@ -1,3 +1,5 @@
+#==============
+
 import os 
 import asyncio
 import re 
@@ -182,17 +184,28 @@ async def msg(update, context):
         await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
 
     # --- STEP: NARATOR INPUT ---
+    # ================= NARATOR =================
     if s["step"] == "narator_input":
-        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
-        is_new = len(s["history"]) == 0
-        prompt_narator = f"Bertindaklah sebagai Narator. Arahan: '{text}', {'buat pembukaan' if is_new else 'lanjutkan alur'}. Target ±1000 karakter."
-        out = await generate_response(prompt_narator, s["history"], s, True)
-        if out:
+    loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+
+    is_new = len(s["history"]) == 0
+    prompt_narator = f"Bertindak sebagai Narator. Arahan: '{text}', {'buat pembukaan cerita' if is_new else 'lanjutkan cerita'}."
+
+    out = await generate_response(prompt_narator, s["history"], s, True)
+
+    if out:
+        try:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            s["history"].append(f"[NARRATOR]:\n{out}")
-            await save(uid, {"history": s["history"], "step": None})
-            await tampilkan_blok_terbaru(uid, context, s)
-        return
+        except:
+            pass
+
+        s["history"].append(f"[NARRATOR]:\n{out}")
+        s["step"] = None
+        s = await apply_updates(uid, s, text)
+
+        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+    return
+
 
 # =================================================================
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
