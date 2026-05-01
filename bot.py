@@ -204,6 +204,27 @@ async def callback(update, context):
             s["history"].append(out)
             s = await apply_updates(uid, s)
             await q.message.reply_text(out, reply_markup=await menu_utama(uid))
+# ================= NARATOR (BALIKIN FITURNYA) =================
+if s["step"] == "narator_input":
+    loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+
+    is_new = len(s["history"]) == 0
+    prompt_narator = f"Bertindak sebagai Narator. Arahan: '{text}', {'buat pembukaan cerita' if is_new else 'lanjutkan cerita'}."
+
+    out = await generate_response(prompt_narator, s["history"], s, True)
+
+    if out:
+        try:
+            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+        except:
+            pass
+
+        s["history"].append(f"[NARRATOR]:\n{out}")
+        s["step"] = None
+        s = await apply_updates(uid, s, text)
+
+        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+    return
 
 # =================================================================
 # [13] START
