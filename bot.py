@@ -194,8 +194,8 @@ async def msg(update, context):
 
         if out:
             try:
-            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            except:
+                await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+                except:
             pass
 
             s["history"].append(f"[NARRATOR]:\n{out}")
