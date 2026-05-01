@@ -47,15 +47,20 @@ async def save(uid, data):
 # =================================================================
 # [3] UI HELPERS (MESSAGE RENDERING) - FIX MESSAGE TOO LONG
 # =================================================================
+def clean_text(teks):
+    return teks.replace("[STORY]:", "").replace("[NARRATOR]:", "").strip()
+
 async def tampilkan_blok_terbaru(uid, context, s):
     history = s.get("history", [])
     teks = history[-1] if history else "📖 Belum ada cerita. Mulailah petualanganmu!"
-    
-    # Potong teks jika lebih dari 4000 karakter agar tidak error
+
+    teks = clean_text(teks)
+
     if len(teks) > 4000:
         teks = teks[:3900] + "...\n\n(Teks terpotong karena terlalu panjang)"
-        
+
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
+
 
 async def tampilkan_dua_blok(uid, context, s):
     history = s.get("history", [])
