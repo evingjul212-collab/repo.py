@@ -139,7 +139,20 @@ async def msg(update, context):
         await save(uid, s)
         await update.message.reply_text(f"Halo {s['name']}!", reply_markup=await menu_utama(uid))
         return
-# ================= NARATOR (BALIKIN FITURNYA) =================
+async def msg(update, context):
+    uid = update.effective_user.id
+    text = update.message.text
+    s = await get_state(uid)
+
+    # ================= SET NAME =================
+    if s["step"] == "set_name":
+        s["name"] = text.capitalize()
+        s["step"] = None
+        await save(uid, s)
+        await update.message.reply_text(f"Halo {s['name']}!", reply_markup=await menu_utama(uid))
+        return
+
+    # ================= NARATOR =================
     if s["step"] == "narator_input":
         loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
@@ -148,19 +161,29 @@ async def msg(update, context):
 
         out = await generate_response(prompt_narator, s["history"], s, True)
 
-    if out:
-        try:
-            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-        except:
-            pass
+        if out:
+            try:
+                await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except:
+                pass
 
-        s["history"].append(f"[NARRATOR]:\n{out}")
-        s["step"] = None
-        s = await apply_updates(uid, s, text)
+            s["history"].append(f"[NARRATOR]:\n{out}")
+            s["step"] = None
+            s = await apply_updates(uid, s, text)
 
-        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
-    return
+            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+        return
 
+ if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
+        out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
+        if out:
+            s["history"].append(f"[STORY]:\n{out}")
+            s = await apply_updates(uid, s, text)
+            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+        return
+
+    # ================= DEFAULT =================
+    await update.message.reply_text("Pilih menu dulu.", reply_markup=await menu_utama(uid))
     # HANDLE PILIHAN A/B/C/D
     if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
         out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
@@ -203,7 +226,7 @@ async def callback(update, context):
             await save(uid, s)
             await q.message.reply_text("↩️ Undo", reply_markup=await menu_utama(uid))
             #================================
-    elif q.data == "step_narator":
+   elif q.data == "step_narator":
     await save(uid, {"step": "narator_input"})
     await q.message.reply_text("🎭 Ketik alur cerita (awal / lanjutan):")
 
