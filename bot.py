@@ -186,14 +186,14 @@ async def msg(update, context):
     # --- STEP: NARATOR INPUT ---
     # ================= NARATOR =================
     if s["step"] == "narator_input":
-    loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
-    is_new = len(s["history"]) == 0
-    prompt_narator = f"Bertindak sebagai Narator. Arahan: '{text}', {'buat pembukaan cerita' if is_new else 'lanjutkan cerita'}."
+        is_new = len(s["history"]) == 0
+        prompt_narator = f"Bertindak sebagai Narator. Arahan: '{text}', {'buat pembukaan cerita' if is_new else 'lanjutkan cerita'}."
 
-    out = await generate_response(prompt_narator, s["history"], s, True)
+        out = await generate_response(prompt_narator, s["history"], s, True)
 
-    if out:
+        if out:
         try:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
         except:
@@ -204,7 +204,7 @@ async def msg(update, context):
         s = await apply_updates(uid, s, text)
 
         await update.message.reply_text(out, reply_markup=await menu_utama(uid))
-    return
+        return
 
 
 # =================================================================
