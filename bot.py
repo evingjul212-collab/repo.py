@@ -202,6 +202,11 @@ async def callback(update, context):
             s["history"].pop()
             await save(uid, s)
             await q.message.reply_text("↩️ Undo", reply_markup=await menu_utama(uid))
+            #================================
+    elif q.data == "step_narator":
+    await save(uid, {"step": "narator_input"})
+    await q.message.reply_text("🎭 Ketik alur cerita (awal / lanjutan):")
+
 
 # ================= START =================
 async def start(update: Update, context):
