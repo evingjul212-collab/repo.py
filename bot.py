@@ -175,12 +175,29 @@ async def msg(update, context):
         return
 
     if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
-        out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
+        last_scene = s["history"][-1]
+
+        prompt = f"""
+        LANJUTKAN ADEGAN INI:
+
+        {last_scene}
+
+        User memilih: {text.upper()}
+
+        WAJIB:
+        - lanjutkan dari adegan di atas
+        - jangan buat cerita baru
+        - jangan ganti nama tokoh
+        """
+
+        out = await generate_response(prompt, s["history"], s, True)
+
         if out:
-            s["history"].append(f"[STORY]:\n{out}")
-            s = await apply_updates(uid, s, text)
-            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+        s["history"].append(f"[STORY]:\n{out}")
+        s = await apply_updates(uid, s, text)
+        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
         return
+
 
     # ================= DEFAULT =================
     await update.message.reply_text("Pilih menu dulu.", reply_markup=await menu_utama(uid))
