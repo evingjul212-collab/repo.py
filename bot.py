@@ -183,8 +183,7 @@ async def msg(update, context):
         await save(uid, {"chars": s["chars"], "step": None, "temp_val": None})
         await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
 
-    # --- STEP: NARATOR INPUT ---
-    # ================= NARATOR =================
+# ================= NARATOR =================
     if s["step"] == "narator_input":
         loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
@@ -194,17 +193,18 @@ async def msg(update, context):
         out = await generate_response(prompt_narator, s["history"], s, True)
 
         if out:
-        try:
+            try:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-        except:
+            except:
             pass
 
-        s["history"].append(f"[NARRATOR]:\n{out}")
-        s["step"] = None
-        s = await apply_updates(uid, s, text)
+            s["history"].append(f"[NARRATOR]:\n{out}")
+            s["step"] = None
+            s = await apply_updates(uid, s, text)
 
-        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
         return
+
 
 
 # =================================================================
