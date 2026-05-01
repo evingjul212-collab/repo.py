@@ -87,16 +87,15 @@ async def generate_response(prompt, history, s, force_options=False):
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
     
     system = (
-        f"Kamu adalah Penulis Novel Visual RomCom.\n"
-        f"DATA DUNIA (Hanya untuk referensi penulis):\n"
-        f"{info_utama}\n"
-        f"DAFTAR NPC: \n{daftar_npc}\n\n"
-        "ATURAN KETAT INTERAKSI (ANTI-META):\n"
-        "1. NPC HANYA boleh tahu informasi yang diucapkan secara langsung dalam dialog atau yang mereka alami sendiri.\n"
-        "2. NPC DILARANG KERAS mengetahui rahasia Tokoh Utama atau NPC lain yang hanya ada di dalam 'Deskripsi' atau riwayat masa lalu yang tidak mereka saksikan.\n"
-        "3. JANGAN biarkan NPC membongkar plot atau rahasia karakter lain kecuali ada adegan pembongkaran rahasia secara eksplisit di riwayat cerita.\n"
-        "4. Bertindaklah seolah-olah setiap NPC memiliki ingatan terbatas hanya pada kejadian yang melibatkan mereka.\n"
-        "5. Tulis cerita ±1000 karakter, dialog natural, narasi suasana di awal."
+        f"MODE POV AKTIF:\n"
+        f"- Cerita ditulis dari sudut pandang Tokoh Utama SAJA ({s['name']}).\n"
+        f"- HANYA {s['name']} yang boleh melakukan aksi fisik aktif.\n"
+        f"- NPC lain (termasuk Lia) TIDAK BOLEH melakukan aksi mandiri.\n"
+        f"- NPC hanya boleh:\n"
+        f"  • berbicara (dialog)\n"
+        f"  • memberikan respon ringan\n"
+        f"- DILARANG menulis aksi detail NPC seperti berjalan, pergi, menyentuh, dll.\n"
+        f"- Fokus pada pikiran, perasaan, dan aksi internal {s['name']}.\n"
     )
     
     if force_options:
