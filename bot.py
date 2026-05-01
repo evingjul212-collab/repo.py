@@ -174,7 +174,7 @@ async def msg(update, context):
             await update.message.reply_text(out, reply_markup=await menu_utama(uid))
         return
 
- if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
+     if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
         out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
         if out:
             s["history"].append(f"[STORY]:\n{out}")
