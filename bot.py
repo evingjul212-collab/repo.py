@@ -83,6 +83,7 @@ async def tampilkan_dua_blok(uid, context, s):
 # [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
+    pov = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
     info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
     
