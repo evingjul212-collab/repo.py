@@ -188,23 +188,7 @@ async def msg(update, context):
         s["history"].append(out)
         s = await apply_updates(uid, s, text)
         await update.message.reply_text(out, reply_markup=await menu_utama(uid))
-
-# =================================================================
-# [12] CALLBACK
-# =================================================================
-async def callback(update, context):
-    q = update.callback_query
-    uid = q.from_user.id
-    s = await get_state(uid)
-    await q.answer()
-
-    if q.data == "lanjut":
-        out = await generate_response("lanjutkan cerita", s["history"], s, True)
-        if out:
-            s["history"].append(out)
-            s = await apply_updates(uid, s)
-            await q.message.reply_text(out, reply_markup=await menu_utama(uid))
-# ================= NARATOR (BALIKIN FITURNYA) =================
+    # ================= NARATOR (BALIKIN FITURNYA) =================
 if s["step"] == "narator_input":
     loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
@@ -225,6 +209,24 @@ if s["step"] == "narator_input":
 
         await update.message.reply_text(out, reply_markup=await menu_utama(uid))
     return
+
+
+# =================================================================
+# [12] CALLBACK
+# =================================================================
+async def callback(update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    s = await get_state(uid)
+    await q.answer()
+
+    if q.data == "lanjut":
+        out = await generate_response("lanjutkan cerita", s["history"], s, True)
+        if out:
+            s["history"].append(out)
+            s = await apply_updates(uid, s)
+            await q.message.reply_text(out, reply_markup=await menu_utama(uid))
+
 
 # =================================================================
 # [13] START
