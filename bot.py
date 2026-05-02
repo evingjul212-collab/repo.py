@@ -193,17 +193,14 @@ async def msg(update, context):
         await save(uid, {"chars": s["chars"], "step": None, "temp_val": None})
         await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
 
-# ================= NARATOR =================
+# --- STEP: NARATOR ---
     if s["step"] == "narator_input":
         loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
-        is_new = len(s["history"]) == 0
         prompt_narator = (
-                    f"Lanjutkan cerita berdasarkan input user berikut:\n"
-                    f"{text}\n\n"
-                    "JANGAN mengulang cerita dari awal.\n"
-                    "WAJIB lanjut dari kejadian terakhir.\n"
-                        )
+            f"Lanjutkan cerita dari kondisi terakhir berdasarkan input ini:\n{text}\n\n"
+            "JANGAN ulang dari awal."
+        )
 
         out = await generate_response(prompt_narator, s["history"], s, True)
 
@@ -214,10 +211,19 @@ async def msg(update, context):
                 pass
 
             s["history"].append(out)
-            s["step"] = "narator_input"
-            s = await apply_updates(uid, s, text)
-            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+            await save(uid, {"history": s["history"], "step": None})
+
+            await update.message.reply_text(
+                out,
+                reply_markup=await menu_utama(uid)
+            )
         return
+
+    # fallback
+    await update.message.reply_text(
+        "Pilih menu dulu.",
+        reply_markup=await menu_utama(uid)
+    )
 
 
 
