@@ -170,7 +170,7 @@ async def msg(update, context):
     if s["step"] == "action":
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
     out = await generate_response(f"Lanjutkan cerita berdasarkan pilihan {text.upper()}. JANGAN tampilkan ulang pilihan.",s["history"], s,True)
-        if out:
+    if out:
             s["history"].append(f"[{tag}]: {out}"); await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(f"--- {tag} ---\n\n{out}", reply_markup=await menu_utama(uid)); return
 
@@ -213,8 +213,8 @@ async def msg(update, context):
             except:
                 pass
 
-             s["history"].append(out)
-             s["step"] = "narator_input"
+            s["history"].append(out)
+            s["step"] = "narator_input"
             s = await apply_updates(uid, s, text)
             await update.message.reply_text(out, reply_markup=await menu_utama(uid))
         return
