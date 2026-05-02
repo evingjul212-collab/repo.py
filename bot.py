@@ -224,8 +224,6 @@ if s["step"] == "narator_input":
         await update.message.reply_text(out, reply_markup=await menu_utama(uid))
     return
 
-        return
-
     # fallback
     await update.message.reply_text(
         "Pilih menu dulu.",
