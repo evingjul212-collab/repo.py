@@ -195,10 +195,10 @@ async def msg(update, context):
 
 # --- STEP: NARATOR ---
 # ================= NARATOR =================
-if s["step"] == "narator_input":
-    loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+    if s["step"] == "narator_input":
+        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
-    is_new = len(s["history"]) == 0
+        is_new = len(s["history"]) == 0
 
     prompt_narator = (
         f"Lanjutkan cerita berdasarkan input user berikut:\n{text}\n\n"
