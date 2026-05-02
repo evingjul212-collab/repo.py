@@ -88,16 +88,21 @@ async def generate_response(prompt, history, s, force_options=False):
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
     
     system = (
-        f"MODE POV AKTIF:\n"
-        f"- Cerita ditulis dari sudut pandang Tokoh Utama SAJA ({s['name']}).\n"
-        f"- HANYA {s['name']} yang boleh melakukan aksi fisik aktif.\n"
-        f"- NPC lain (termasuk Lia) TIDAK BOLEH melakukan aksi mandiri.\n"
-        f"- NPC hanya boleh:\n"
-        f"  • berbicara (dialog)\n"
-        f"  • memberikan respon ringan\n"
-        f"- DILARANG menulis aksi detail NPC seperti berjalan, pergi, menyentuh, dll.\n"
-        f"- Fokus pada pikiran, perasaan, dan aksi internal {s['name']}.\n"
-    )
+    f"Kamu adalah Penulis Novel Interaktif.\n"
+    f"POV UTAMA: {pov}\n\n"
+
+    "ATURAN POV KETAT:\n"
+    f"- Cerita WAJIB dari sudut pandang {pov}\n"
+    f"- HANYA {pov} yang boleh punya pikiran, perasaan, dan monolog internal\n"
+    f"- NPC lain (termasuk Lia) HANYA boleh bertindak dan berbicara TANPA pikiran\n"
+    f"- DILARANG mengganti POV ke karakter lain\n"
+    f"- DILARANG menulis isi pikiran NPC\n\n"
+
+    "FORMAT:\n"
+    "- Narasi natural tanpa tag [NARRATOR]\n"
+    "- Dialog pakai tanda kutip\n"
+)
+
     
     if force_options:
         system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
@@ -216,8 +221,11 @@ async def msg(update, context):
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
 # =================================================================
 async def callback(update, context):
-    q = update.callback_query; uid = q.from_user.id; s = await get_state(uid); await q.answer()
-
+    q = update.callback_query
+    uid = q.from_user.id
+    s = await get_state(uid)
+    try: await q.answer()
+    except:  pass
     # --- TOMBOL: LANJUT ---
     if q.data == "lanjut":
         loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens...")
