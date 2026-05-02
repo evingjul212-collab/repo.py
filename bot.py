@@ -242,7 +242,7 @@ async def callback(update, context):
         out = await generate_response("Lanjutkan alur cerita, ±1000 karakter.", s["history"], s, True) 
         if out:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-        s["history"].append{out) await save(uid, {"history": s["history"]})
+            s["history"].append{out) await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
 
     # --- TOMBOL: TAMBAH NPC ---
