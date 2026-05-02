@@ -169,8 +169,12 @@ async def msg(update, context):
     # --- STEP: ACTION (INPUT BEBAS) ---
     if s["step"] == "action":
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
-        out = await generate_response(f"Aksi {tag}: {text}", s["history"], s, False)
-        if out:
+            out = await generate_response(
+                f"Lanjutkan cerita berdasarkan pilihan {text.upper()}. JANGAN tampilkan ulang pilihan.",
+                s["history"],
+                s,
+                True
+)        if out:
             s["history"].append(f"[{tag}]: {out}"); await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(f"--- {tag} ---\n\n{out}", reply_markup=await menu_utama(uid)); return
 
@@ -178,7 +182,7 @@ async def msg(update, context):
     if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
         out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
         if out:
-            s["history"].append(f"[STORY]: {out}"); await save(uid, {"history": s["history"]})
+            s["history"].append(out); await save(uid, {"history": s["history"]})
             await tampilkan_dua_blok(uid, context, s); return
 
     # --- STEP: TAMBAH NPC (NAMA) ---
@@ -198,7 +202,12 @@ async def msg(update, context):
         loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
         is_new = len(s["history"]) == 0
-        prompt_narator = f"Bertindak sebagai Narator. Arahan: '{text}', {'buat pembukaan cerita' if is_new else 'lanjutkan cerita'}."
+        prompt_narator = (
+                    f"Lanjutkan cerita berdasarkan input user berikut:\n"
+                    f"{text}\n\n"
+                    "JANGAN mengulang cerita dari awal.\n"
+                    "WAJIB lanjut dari kejadian terakhir.\n"
+                        )
 
         out = await generate_response(prompt_narator, s["history"], s, True)
 
@@ -208,10 +217,9 @@ async def msg(update, context):
             except:
                 pass
 
-            s["history"].append(f"[NARRATOR]:\n{out}")
-            s["step"] = None
+             s["history"].append(out)
+             s["step"] = "narator_input"
             s = await apply_updates(uid, s, text)
-
             await update.message.reply_text(out, reply_markup=await menu_utama(uid))
         return
 
@@ -232,7 +240,7 @@ async def callback(update, context):
         out = await generate_response("Lanjutkan alur cerita, ±1000 karakter.", s["history"], s, True) 
         if out:
             await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
+            s["history"].append{out); await save(uid, {"history": s["history"]})
             await tampilkan_blok_terbaru(uid, context, s)
 
     # --- TOMBOL: TAMBAH NPC ---
