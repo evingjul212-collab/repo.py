@@ -83,32 +83,26 @@ async def tampilkan_dua_blok(uid, context, s):
 # [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
-    pov = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
-    info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
-    daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
+    # Tentukan siapa yang sedang memegang POV
+    pov_name = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
     
     system = (
-    f"Kamu adalah Penulis Novel Interaktif.\n"
-    f"POV UTAMA: {pov}\n\n"
-
-    "ATURAN POV KETAT:\n"
-    f"- Cerita WAJIB dari sudut pandang {pov}\n"
-    f"- HANYA {pov} yang boleh punya pikiran, perasaan, dan monolog internal\n"
-    f"- NPC lain (termasuk Lia) HANYA boleh bertindak dan berbicara TANPA pikiran\n"
-    f"- DILARANG mengganti POV ke karakter lain\n"
-    f"- DILARANG menulis isi pikiran NPC\n\n"
-
-    "FORMAT:\n"
-    "- Narasi natural tanpa tag [NARRATOR]\n"
-    "- Dialog pakai tanda kutip\n"
-)
-
+        f"Kamu adalah Penulis Novel Interaktif dewasa Profesional.\n"
+        f"FOKUS POV: {pov_name}\n\n"
+        "ATURAN PENULISAN:\n"
+        f"- WAJIB menggunakan sudut pandang orang pertama ('Aku') dari perspektif {pov_name}.\n"
+        f"- Tuliskan pikiran internal, emosi, dan sensorik yang dirasakan oleh {pov_name}.\n"
+        "- Karakter lain hanya boleh terlihat dari apa yang mereka lakukan/katakan (deskripsi eksternal).\n"
+        "- Gunakan gaya bahasa yang deskriptif dan imersif.\n"
+        "- JANGAN menuliskan pikiran karakter lain.\n"
+        "- fokus ke lebih banyak dialog interaktif.\n"
+    )
     
     if force_options:
-        system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
+        system += "\nWAJIB akhiri cerita dengan 4 pilihan aksi yang sangat spesifik: A, B, C, D."
     
     context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
+    full_prompt = f"{system}\n\n[KONTEKS TERAKHIR]\n{context}\n\n[INSTRUKSI AKSI]\n{prompt}"
 
     for m in MODELS:
         try:
