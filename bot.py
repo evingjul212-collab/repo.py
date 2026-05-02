@@ -194,29 +194,36 @@ async def msg(update, context):
         await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
 
 # --- STEP: NARATOR ---
-    if s["step"] == "narator_input":
-        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+# ================= NARATOR =================
+if s["step"] == "narator_input":
+    loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
-        prompt_narator = (
-            f"Lanjutkan cerita dari kondisi terakhir berdasarkan input ini:\n{text}\n\n"
-            "JANGAN ulang dari awal."
-        )
+    is_new = len(s["history"]) == 0
 
-        out = await generate_response(prompt_narator, s["history"], s, True)
+    prompt_narator = (
+        f"Lanjutkan cerita berdasarkan input user berikut:\n{text}\n\n"
+        + ("Buat pembukaan cerita." if is_new else "WAJIB lanjut dari cerita terakhir, JANGAN ulang dari awal.")
+    )
 
-        if out:
-            try:
-                await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            except:
-                pass
+    out = await generate_response(prompt_narator, s["history"], s, True)
 
-            s["history"].append(out)
-            await save(uid, {"history": s["history"], "step": None})
+    if out:
+        try:
+            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+        except:
+            pass
 
-            await update.message.reply_text(
-                out,
-                reply_markup=await menu_utama(uid)
-            )
+        # simpan TANPA tag aneh
+        s["history"].append(out)
+
+        # 🔥 PENTING: JANGAN MATIKAN MODE
+        s["step"] = "narator_input"
+
+        s = await apply_updates(uid, s, text)
+
+        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+    return
+
         return
 
     # fallback
