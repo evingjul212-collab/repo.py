@@ -83,26 +83,23 @@ async def tampilkan_dua_blok(uid, context, s):
 # [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
-    # Tentukan siapa yang sedang memegang POV
     pov_name = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
     
     system = (
-        f"Kamu adalah Penulis Novel Interaktif dewasa Profesional.\n"
-        f"FOKUS POV: {pov_name}\n\n"
-        "ATURAN PENULISAN:\n"
-        f"- WAJIB menggunakan sudut pandang orang pertama ('Aku') dari perspektif {pov_name}.\n"
-        f"- Tuliskan pikiran internal, emosi, dan sensorik yang dirasakan oleh {pov_name}.\n"
-        "- Karakter lain hanya boleh terlihat dari apa yang mereka lakukan/katakan (deskripsi eksternal).\n"
-        "- Gunakan gaya bahasa yang deskriptif dan imersif.\n"
-        "- JANGAN menuliskan pikiran karakter lain.\n"
-        "- fokus ke lebih banyak dialog interaktif.\n"
+        f"Kamu adalah Penulis Novel dewasa Interaktif yang ahli dalam dialog intens.\n"
+        f"FOKUS POV: {pov_name} (Gunakan kata ganti 'Aku').\n\n"
+        "ATURAN DIALOG & INTERAKSI:\n"
+        "- PERBANYAK DIALOG antar karakter. Buat percakapan yang terasa hidup dan reaktif.\n"
+        "- Fokus pada ketegangan verbal, godaan, atau konflik dalam percakapan.\n"
+        "- Kurangi narasi deskripsi lingkungan yang panjang; fokus pada gerakan tubuh saat berbicara (body language).\n"
+        "- Setiap tindakan 'Aku' harus memicu respon langsung dari karakter lawan bicara.\n"
     )
     
     if force_options:
-        system += "\nWAJIB akhiri cerita dengan 4 pilihan aksi yang sangat spesifik: A, B, C, D."
+        system += "\nWAJIB akhiri dengan 4 pilihan aksi (A, B, C, D) yang memicu kelanjutan dialog."
     
     context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n[KONTEKS TERAKHIR]\n{context}\n\n[INSTRUKSI AKSI]\n{prompt}"
+    full_prompt = f"{system}\n\n[KONTEKS TERAKHIR]\n{context}\n\n[INSTRUKSI AKSI SEKARANG]\n{prompt}"
 
     for m in MODELS:
         try:
@@ -161,14 +158,15 @@ async def msg(update, context):
         await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
 
       # --- STEP: ACTION (INPUT BEBAS) ---
-   # --- STEP: ACTION (INPUT BEBAS) ---
-    if s["step"] == "action":
+       if s["step"] == "action":
         # Tentukan tag nama (User Utama atau NPC)
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
         
         loading_msg = await update.message.reply_text(f"⏳ {tag} sedang bertindak...")
         
-        out = await generate_response(f"Lanjutkan cerita di mana {tag} melakukan aksi: {text}. JANGAN tampilkan ulang pilihan.", s["history"], s, True)
+        out = await generate_response(f"Lanjutkan dialog intens antara {tag} dan karakter lawan. "
+        f"{tag} melakukan: {text}. Buat percakapan yang romatis dewasa dan responsif.", 
+        s["history"],, s, True)
         
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
@@ -260,9 +258,6 @@ async def msg(update, context):
         "Pilih menu dulu.",
         reply_markup=await menu_utama(uid)
     )
-
-
-
 # =================================================================
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
 # =================================================================
@@ -273,13 +268,34 @@ async def callback(update, context):
     try: await q.answer()
     except:  pass
     # --- TOMBOL: LANJUT ---
-    if q.data == "lanjut":
-        loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens...")
-        out = await generate_response("Lanjutkan alur cerita, ±1000 karakter.", s["history"], s, True) 
+        if q.data == "lanjut":
+        # Tentukan siapa POV yang sedang aktif
+        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
+        
+        loading_msg = await q.message.reply_text(f"⏳ {tag} melanjutkan pembicaraan...")
+        
+        # Instruksi khusus untuk "Lanjut": Fokus pada perkembangan dialog dan respon lawan bicara
+        prompt_lanjut = (
+            f"Lanjutkan adegan ini secara natural. Fokus pada interaksi dialog yang lebih dalam "
+            f"dan reaksi emosional antara {tag} dan karakter di hadapannya. "
+            f"Jangan biarkan cerita berhenti, buat suasana semakin intens."
+        )
+        
+        out = await generate_response(prompt_lanjut, s["history"], s, True) 
+        
         if out:
-            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
-            await tampilkan_blok_terbaru(uid, context, s)
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            # Format dengan header dan tag POV seperti permintaanmu
+            formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
+            
+            # Simpan ke history
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"]})
+            
+            # Tampilkan pesan terbaru dengan format yang sudah rapi
+            await q.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
 
     # --- TOMBOL: TAMBAH NPC ---
     elif q.data == "add_npc":
