@@ -125,7 +125,7 @@ async def generate_narator(prompt, history, s):
         "FORMAT: Tampilkan narasi murni tanpa tag nama di awal teks."
     )
     context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n[KONTEKS CERITA]\n{context}\n\n[INPUT USER UNTUK NARASI]\n{text}"
+    full_prompt = f"{system}\n\n[KONTEKS CERITA]\n{context}\n\n[INPUT USER UNTUK NARASI]\n{prompt}"
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
