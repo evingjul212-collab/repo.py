@@ -135,11 +135,11 @@ async def menu_utama(uid):
     return InlineKeyboardMarkup(kb)
 
 # =================================================================
-# [6] TEXT MESSAGE HANDLER (LOGIC BY STEP)
+# [6] TEXT MESSAGE HANDLER (LOGIC BY STEP) - FIXED BUG MENU KARAKTER
 # =================================================================
 async def msg(update, context):
     uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
-
+    
     # --- STEP: NAMA AWAL ---
     if s["step"] == "set_name":
         await save(uid, {"name": text.capitalize(), "step": None})
@@ -159,64 +159,66 @@ async def msg(update, context):
         await save(uid, {"name": s["name"], "desc_utama": s["desc_utama"], "chars": s["chars"], "step": None, "temp_val": None})
         await update.message.reply_text("✨ Karakter diperbarui!", reply_markup=await menu_utama(uid)); return
 
-    # --- STEP: SAVE MANUAL (NAMA SLOT) ---
+    # --- STEP: SAVE MANUAL ---
     if s["step"] == "save_manual_step":
         save_data = {"user_id": uid, "save_name": text, "history": s["history"], "chars": s["chars"], "name": s["name"], "desc_utama": s.get("desc_utama", "Tokoh Utama")}
         await archives.insert_one(save_data)
         await save(uid, {"step": None})
         await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
 
-    # --- STEP: ACTION (INPUT BEBAS) ---
-    # --- STEP: ACTION (INPUT BEBAS) ---
-    if s["step"] == "action":
-        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
-        out = await generate_response(f"Lanjutkan cerita berdasarkan pilihan {text.upper()}. JANGAN tampilkan ulang pilihan.", s["history"], s, True)
-        if out:
-            s["history"].append(f"[{tag}]: {out}")
-            await save(uid, {"history": s["history"], "step": None})
-            await update.message.reply_text(f"--- {tag} ---\n\n{out}", reply_markup=await menu_utama(uid))
-            return # Kasih return biar gak lanjut ke bawah
+    # --- STEP: TAMBAH NPC ---
+    if s["step"] == "add_npc_name":
+        await save(uid, {"temp_val": text, "step": "add_npc_desc"})
+        await update.message.reply_text(f"Nama: **{text}**\n\nSekarang masukkan **Deskripsi** NPC tersebut:"); return
 
-    # --- STEP: ACTION (INPUT BEBAS) ---
-    if s["step"] == "action":
-        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
-        out = await generate_response(f"Lanjutkan cerita berdasarkan pilihan {text.upper()}. JANGAN tampilkan ulang pilihan.", s["history"], s, True)
-        if out:
-            s["history"].append(f"[{tag}]: {out}")
-            await save(uid, {"history": s["history"], "step": None})
-            await update.message.reply_text(f"--- {tag} ---\n\n{out}", reply_markup=await menu_utama(uid))
-            return # Kasih return biar gak lanjut ke bawah
+    if s["step"] == "add_npc_desc":
+        new_npc = {"name": s["temp_val"], "desc": text}
+        s["chars"].append(new_npc)
+        await save(uid, {"chars": s["chars"], "step": None, "temp_val": None})
+        await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
 
     # --- STEP: NARATOR ---
     if s["step"] == "narator_input":
-        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
-        is_new = len(s["history"]) == 0
-        
-        prompt_narator = (
-            f"Lanjutkan cerita berdasarkan input user berikut:\n{text}\n\n"
-            + ("Buat pembukaan cerita." if is_new else "WAJIB lanjut dari cerita terakhir, JANGAN ulang dari awal.")
-        )
-
-        out = await generate_response(prompt_narator, s["history"], s, True)
-
+        loading_msg = await update.message.reply_text("🎭 Narator menyusun alur...")
+        out = await generate_narator(text, s["history"], s)
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
-
-            s["history"].append(out)
-            # s["step"] = "narator_input"  # Tetap di mode narator (opsional)
-            await save(uid, {"history": s["history"], "step": "narator_input"}) # Lu lupa save step/history di sini
-            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+            s["history"].append(f"[NARRATOR]: {out}")
+            await save(uid, {"history": s["history"], "step": None})
+            await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
         return
 
-    # --- STEP: PILIHAN A/B/C/D ---
-    if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
-        out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
-        if out:
-            s["history"].append(out); await save(uid, {"history": s["history"]})
-            await tampilkan_dua_blok(uid, context, s); return
+    # --- LOGIC FALLBACK: JIKA STEP KOSONG ATAU 'action' ---
+    # Ini memperbaiki bug ketika user langsung ketik saat di menu karakter
+    if s["step"] == "action" or s["step"] is None:
+        # Jika riwayat kosong, jangan proses sebagai aksi dulu
+        if not s["history"]:
+            await update.message.reply_text("Silakan mulai cerita baru atau pilih karakter dulu.", reply_markup=await menu_utama(uid))
+            return
 
-    # --- STEP: TAMBAH NPC (NAMA) ---
+        # Cek apakah ini input A/B/C/D
+        if re.match(r'^[a-dA-D]$', text.strip()):
+            out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
+            if out:
+                s["history"].append(out); await save(uid, {"history": s["history"]})
+                await tampilkan_dua_blok(uid, context, s); return
+
+        # Jika bukan A/B/C/D, anggap sebagai aksi karakter yang sedang terpilih
+        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
+        loading_msg = await update.message.reply_text(f"⏳ {tag} merespon...")
+        
+        out = await generate_response(f"Lanjutkan cerita di mana {tag} melakukan aksi: {text}.", s["history"], s, True)
+        
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"], "step": None})
+            await update.message.reply_text(f"--- {tag} ---\n\n[{tag}]: {out}", reply_markup=await menu_utama(uid))
+            return
+
+       # --- STEP: TAMBAH NPC (NAMA) ---
     if s["step"] == "add_npc_name":
         await save(uid, {"temp_val": text, "step": "add_npc_desc"})
         await update.message.reply_text(f"Nama: **{text}**\n\nSekarang masukkan **Deskripsi** NPC tersebut:"); return
