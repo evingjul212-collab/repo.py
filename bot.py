@@ -165,16 +165,12 @@ async def msg(update, context):
         
         out = await generate_response(f"Lanjutkan dialog intens antara {tag} dan karakter lawan. "
             f"{tag} melakukan: {text}. Buat percakapan yang romatis dewasa dan responsif.", s["history"], s, True)
-            if out:
-        try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            if out: try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
-
             # Format hasil akhir dengan Header dan Tag sesuai permintaanmu
             formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
-            
             # Simpan ke history (tanpa header dekoratif agar konteks AI tetap bersih)
             s["history"].append(f"[{tag}]: {out}")
-            
             await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
             return
