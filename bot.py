@@ -1,4 +1,4 @@
-#==============
+#============== jadi tapi belum update
 
 import os 
 import asyncio
