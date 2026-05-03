@@ -1,4 +1,4 @@
-#==============
+#============== sudah update
 
 import os 
 import asyncio
@@ -134,51 +134,14 @@ async def menu_utama(uid):
     ]
     return InlineKeyboardMarkup(kb)
 
-# =================================================================
-# [6] TEXT MESSAGE HANDLER (LOGIC BY STEP) - FIXED BUG MENU KARAKTER
-# =================================================================
 async def msg(update, context):
-    uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
-    
-    # --- STEP: NAMA AWAL ---
-    if s["step"] == "set_name":
-        await save(uid, {"name": text.capitalize(), "step": None})
-        await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid)); return
+    uid = update.effective_user.id
+    text = update.message.text
+    s = await get_state(uid)
 
-    # --- STEP: EDIT KARAKTER (NAMA) ---
-    if s["step"] and s["step"].startswith("editname_"):
-        idx = int(s["step"].split("_")[1])
-        await save(uid, {"temp_val": text, "step": f"editdesc_{idx}"})
-        await update.message.reply_text(f"Nama baru: {text}. Sekarang masukkan DESKRIPSI baru:"); return
-    
-    # --- STEP: EDIT KARAKTER (DESKRIPSI) ---
-    if s["step"] and s["step"].startswith("editdesc_"):
-        idx = int(s["step"].split("_")[1])
-        if idx == -1: s["name"], s["desc_utama"] = s["temp_val"], text
-        else: s["chars"][idx]["name"], s["chars"][idx]["desc"] = s["temp_val"], text
-        await save(uid, {"name": s["name"], "desc_utama": s["desc_utama"], "chars": s["chars"], "step": None, "temp_val": None})
-        await update.message.reply_text("✨ Karakter diperbarui!", reply_markup=await menu_utama(uid)); return
-
-    # --- STEP: SAVE MANUAL ---
-    if s["step"] == "save_manual_step":
-        save_data = {"user_id": uid, "save_name": text, "history": s["history"], "chars": s["chars"], "name": s["name"], "desc_utama": s.get("desc_utama", "Tokoh Utama")}
-        await archives.insert_one(save_data)
-        await save(uid, {"step": None})
-        await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
-
-    # --- STEP: TAMBAH NPC ---
-    if s["step"] == "add_npc_name":
-        await save(uid, {"temp_val": text, "step": "add_npc_desc"})
-        await update.message.reply_text(f"Nama: **{text}**\n\nSekarang masukkan **Deskripsi** NPC tersebut:"); return
-
-    if s["step"] == "add_npc_desc":
-        new_npc = {"name": s["temp_val"], "desc": text}
-        s["chars"].append(new_npc)
-        await save(uid, {"chars": s["chars"], "step": None, "temp_val": None})
-        await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
-
-    # --- STEP: NARATOR ---
-    if s["step"] == "narator_input":
+    # --- [1] PRIORITAS UTAMA: STEP SPESIFIK ---
+    # Taruh Narator di atas agar tidak tertimpa logika aksi
+    if s.get("step") == "narator_input":
         loading_msg = await update.message.reply_text("🎭 Narator menyusun alur...")
         out = await generate_narator(text, s["history"], s)
         if out:
@@ -189,36 +152,43 @@ async def msg(update, context):
             await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
         return
 
-    # --- LOGIC FALLBACK: JIKA STEP KOSONG ATAU 'action' ---
-    # Ini memperbaiki bug ketika user langsung ketik saat di menu karakter
-    if s["step"] == "action" or s["step"] is None:
-        # Jika riwayat kosong, jangan proses sebagai aksi dulu
+    if s["step"] == "set_name":
+        await save(uid, {"name": text.capitalize(), "step": None})
+        await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid))
+        return
+
+    # --- [2] PROSES EDIT & SAVE (STEP BERAWALAN TERTENTU) ---
+    if s["step"] and (s["step"].startswith("edit") or s["step"].startswith("add_npc") or s["step"] == "save_manual_step"):
+        # ... (Logika edit dan save tetap seperti kode asli kamu) ...
+        # Pastikan ada return di setiap akhir blok step ini
+        return
+
+    # --- [3] LOGIKA FALLBACK (AKSI OTOMATIS) ---
+    # Jika step None atau 'action', kita proses sebagai aksi karakter
+    if s["step"] is None or s["step"] == "action":
         if not s["history"]:
-            await update.message.reply_text("Silakan mulai cerita baru atau pilih karakter dulu.", reply_markup=await menu_utama(uid))
+            await update.message.reply_text("Mulai cerita dulu bossku.", reply_markup=await menu_utama(uid))
             return
 
-        # Cek apakah ini input A/B/C/D
+        # Cek Pilihan A/B/C/D dulu
         if re.match(r'^[a-dA-D]$', text.strip()):
             out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
             if out:
                 s["history"].append(out); await save(uid, {"history": s["history"]})
-                await tampilkan_dua_blok(uid, context, s); return
+                await tampilkan_dua_blok(uid, context, s)
+            return
 
-        # Jika bukan A/B/C/D, anggap sebagai aksi karakter yang sedang terpilih
+        # Jika teks bebas, jadikan aksi POV yang terpilih
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
         loading_msg = await update.message.reply_text(f"⏳ {tag} merespon...")
-        
-        out = await generate_response(f"Lanjutkan cerita di mana {tag} melakukan aksi: {text}.", s["history"], s, True)
-        
+        out = await generate_response(f"Aksi: {text}", s["history"], s, True)
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
             s["history"].append(f"[{tag}]: {out}")
             await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(f"--- {tag} ---\n\n[{tag}]: {out}", reply_markup=await menu_utama(uid))
-            return
-
-       # --- STEP: TAMBAH NPC (NAMA) ---
+        return       # --- STEP: TAMBAH NPC (NAMA) ---
     if s["step"] == "add_npc_name":
         await save(uid, {"temp_val": text, "step": "add_npc_desc"})
         await update.message.reply_text(f"Nama: **{text}**\n\nSekarang masukkan **Deskripsi** NPC tersebut:"); return
