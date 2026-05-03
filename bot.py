@@ -156,7 +156,6 @@ async def msg(update, context):
         await archives.insert_one(save_data)
         await save(uid, {"step": None})
         await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
-
       # --- STEP: ACTION (INPUT BEBAS) ---
     if s["step"] == "action":
         # Tentukan tag nama (User Utama atau NPC)
@@ -167,7 +166,7 @@ async def msg(update, context):
         out = await generate_response(f"Lanjutkan dialog intens antara {tag} dan karakter lawan. "
             f"{tag} melakukan: {text}. Buat percakapan yang romatis dewasa dan responsif.", s["history"], s, True)
             if out:
-            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+        try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
 
             # Format hasil akhir dengan Header dan Tag sesuai permintaanmu
