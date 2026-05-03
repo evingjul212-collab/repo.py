@@ -108,6 +108,33 @@ async def generate_response(prompt, history, s, force_options=False):
             return resp.text.strip()
         except: continue
     return None
+    #====================================
+    async def generate_narator(prompt, history, s):
+    # Mengambil daftar nama untuk referensi subjek
+    nama_utama = s["name"]
+    daftar_npc = ", ".join([c['name'] for c in s.get("chars", [])])
+
+    system = (
+        "Kamu adalah Narator Novel yang deskriptif.\n"
+        "GAYA PENULISAN:\n"
+        "- Gunakan Sudut Pandang Orang Ketiga (Omniscient).\n"
+        "- JANGAN pernah gunakan kata 'Aku' atau 'Saya'.\n"
+        f"- Gunakan nama karakter seperti '{nama_utama}' atau NPC ({daftar_npc}) sebagai subjek.\n"
+        "- Ceritakan suasana, tindakan fisik, dan perkembangan situasi secara dramatis.\n"
+        "- Fokus pada narasi yang menggerakkan alur cerita berdasarkan input user.\n"
+        "FORMAT: Tampilkan narasi murni tanpa tag nama di awal teks."
+    )
+    
+    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
+    full_prompt = f"{system}\n\n[KONTEKS CERITA]\n{context}\n\n[INPUT USER UNTUK NARASI]\n{text}"
+
+    for m in MODELS:
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
+            return resp.text.strip()
+        except: continue
+    return None
 # =================================================================
 # [5] KEYBOARD MENUS
 # =================================================================
@@ -180,25 +207,25 @@ async def msg(update, context):
             await update.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
             return
 
-    # --- STEP: NARATOR ---
+   # --- STEP: NARATOR ---
     if s["step"] == "narator_input":
-        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
-        is_new = len(s["history"]) == 0
+        loading_msg = await update.message.reply_text("🎭 Narator sedang menyusun alur...")
         
-        prompt_narator = (
-            f"Lanjutkan cerita berdasarkan input user berikut:\n{text}\n\n"
-            + ("Buat pembukaan cerita." if is_new else "WAJIB lanjut dari cerita terakhir, JANGAN ulang dari awal.")
-        )
-        out = await generate_response(prompt_narator, s["history"], s, True)
+        # Gunakan fungsi generate_narator yang baru
+        out = await generate_narator(text, s["history"], s)
 
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
 
-            s["history"].append(out)
-            # s["step"] = "narator_input"  # Tetap di mode narator (opsional)
-            await save(uid, {"history": s["history"], "step": "narator_input"}) # Lu lupa save step/history di sini
-            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+            # Simpan dengan tag [NARRATOR] agar AI POV tahu ini adalah kejadian lingkungan
+            s["history"].append(f"[NARRATOR]: {out}")
+            
+            await save(uid, {"history": s["history"], "step": None}) # Matikan step setelah input
+            
+            # Tampilkan dengan header khusus Narator
+            formatted_narration = f"--- NARRATOR ---\n\n{out}"
+            await update.message.reply_text(formatted_narration, reply_markup=await menu_utama(uid))
         return
 
     # --- STEP: PILIHAN A/B/C/D ---
