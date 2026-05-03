@@ -117,6 +117,31 @@ async def generate_response(prompt, history, s, force_options=False):
             return resp.text.strip()
         except: continue
     return None
+   #====================================
+async def generate_narator(prompt, history, s):
+    # Mengambil daftar nama untuk referensi subjek
+    nama_utama = s["name"]
+    daftar_npc = ", ".join([c['name'] for c in s.get("chars", [])])
+
+    system = (
+        "Kamu adalah Narator Novel yang deskriptif.\n"
+        "GAYA PENULISAN:\n"
+        "- Gunakan Sudut Pandang Orang Ketiga (Omniscient).\n"
+        "- JANGAN pernah gunakan kata 'Aku' atau 'Saya'.\n"
+        f"- Gunakan nama karakter seperti '{nama_utama}' atau NPC ({daftar_npc}) sebagai subjek.\n"
+        "- Ceritakan suasana, tindakan fisik, dan perkembangan situasi secara dramatis.\n"
+        "- Fokus pada narasi yang menggerakkan alur cerita berdasarkan input user.\n"
+        "FORMAT: Tampilkan narasi murni tanpa tag nama di awal teks."
+    )
+    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
+    full_prompt = f"{system}\n\n[KONTEKS CERITA]\n{context}\n\n[INPUT USER UNTUK NARASI]\n{prompt}"
+    for m in MODELS:
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
+            return resp.text.strip()
+        except: continue
+    return None
 # =================================================================
 # [5] KEYBOARD MENUS
 # =================================================================
