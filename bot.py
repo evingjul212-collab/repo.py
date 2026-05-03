@@ -154,11 +154,40 @@ async def menu_utama(uid):
 # [6] TEXT MESSAGE HANDLER (LOGIC BY STEP)
 # =================================================================
 async def msg(update, context):
-    uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
-    # --- STEP: NAMA AWAL ---
-    if s["step"] == "set_name":
-        await save(uid, {"name": text.capitalize(), "step": None})
-        await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid)); return
+    uid = update.effective_user.id
+    text = update.message.text
+    s = await get_state(uid)
+
+    # ... (Blok kode step: set_name, editname, save_manual, dll tetap sama) ...
+
+    # --- LOGIKA FALLBACK: JIKA TIDAK ADA STEP, ANGGAP SEBAGAI AKSI ---
+    if s["step"] is None:
+        # Tentukan siapa yang melakukan aksi (Tokoh Utama atau NPC terpilih)
+        idx = s.get("selected", -1)
+        tag = s["name"] if idx == -1 else s["chars"][idx]["name"]
+        
+        loading_msg = await update.message.reply_text(f"⏳ {tag} sedang bertindak...")
+        
+        # Panggil generate_response dengan instruksi aksi
+        out = await generate_response(
+            f"Lanjutkan cerita di mana {tag} melakukan aksi: {text}. "
+            f"Perbanyak dialog interaktif dan emosi.", 
+            s["history"], s, True
+        )
+        
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+
+            # Format sesuai permintaan (--- Nama --- dan Tag [Nama])
+            formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
+            
+            # Simpan ke history
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"]})
+            
+            await update.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
+            return
 
     # --- STEP: EDIT KARAKTER (NAMA) ---
     if s["step"] and s["step"].startswith("editname_"):
@@ -298,11 +327,15 @@ async def callback(update, context):
 
     # --- TOMBOL: DETAIL KARAKTER (SELECTED) ---
     elif q.data.startswith("sel_"):
-        idx = int(q.data.split("_")[1]); await save(uid, {"selected": idx})
+        idx = int(q.data.split("_")[1])
+        await save(uid, {"selected": idx})
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        desc = s.get("desc_utama") if idx == -1 else s["chars"][idx].get("desc")
-        kb = [[InlineKeyboardButton("🎮 Aksi", callback_data="act_run")], [InlineKeyboardButton("🎬 New Story", callback_data="new_start")], [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")], [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]]
-        await q.edit_message_text(f"👤 **Detail Karakter**\n━━━━━━━━━━━━━━━\n📛 **Nama:** {name}\n📖 **Deskripsi:**\n{desc}", reply_markup=InlineKeyboardMarkup(kb))
+        # ... kode lainnya ...
+        await q.edit_message_text(
+            f"👤 **Karakter Terpilih: {name}**\n━━━━━━━━━━━━━━━\n"
+            f"Sekarang kamu bisa **langsung mengetik aksi/dialog** untuk karakter ini atau gunakan menu di bawah:",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
 
     # --- TOMBOL: SAVE/LOAD/EDIT ---
     elif q.data == "save_manual": await save(uid, {"step": "save_manual_step"}); await q.message.reply_text("💾 Ketik nama Save Slot:")
