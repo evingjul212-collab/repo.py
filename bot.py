@@ -158,7 +158,7 @@ async def msg(update, context):
         await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
 
       # --- STEP: ACTION (INPUT BEBAS) ---
-       if s["step"] == "action":
+    if s["step"] == "action":
         # Tentukan tag nama (User Utama atau NPC)
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
         
