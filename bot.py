@@ -353,7 +353,6 @@ async def callback(update, context):
             f"💡 *Tips: Kamu bisa langsung mengetik pesan di sini untuk melakukan aksi sebagai {name}.*",
             reply_markup=InlineKeyboardMarkup(kb)
         )
-        )
 
     # --- TOMBOL: SAVE/LOAD/EDIT ---
     elif q.data == "save_manual": await save(uid, {"step": "save_manual_step"}); await q.message.reply_text("💾 Ketik nama Save Slot:")
