@@ -157,20 +157,25 @@ async def msg(update, context):
         await save(uid, {"step": None})
         await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
       # --- STEP: ACTION (INPUT BEBAS) ---
+   # --- STEP: ACTION (INPUT BEBAS) ---
     if s["step"] == "action":
         # Tentukan tag nama (User Utama atau NPC)
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
         
         loading_msg = await update.message.reply_text(f"⏳ {tag} sedang bertindak...")
         
-        out = await generate_response(f"Lanjutkan dialog intens antara {tag} dan karakter lawan. "
-        f"{tag} melakukan: {text}. Buat percakapan yang romatis dewasa dan responsif.", s["history"], s, True)
-        if out: try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+        out = await generate_response(f"Lanjutkan cerita di mana {tag} melakukan aksi: {text}. JANGAN tampilkan ulang pilihan.", s["history"], s, True)
+        
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
+
             # Format hasil akhir dengan Header dan Tag sesuai permintaanmu
             formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
+            
             # Simpan ke history (tanpa header dekoratif agar konteks AI tetap bersih)
             s["history"].append(f"[{tag}]: {out}")
+            
             await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
             return
