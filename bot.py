@@ -274,13 +274,33 @@ async def callback(update, context):
     try: await q.answer()
     except:  pass
     # --- TOMBOL: LANJUT ---
+   # --- TOMBOL: LANJUT (ANTI-HALUSINASI) ---
     if q.data == "lanjut":
-        loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens...")
-        out = await generate_response("Lanjutkan alur cerita, ±1000 karakter.", s["history"], s, True) 
+        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
+        
+        loading_msg = await q.message.reply_text(f"⏳ {tag} melanjutkan...")
+        
+        # PROMPT DIPERKETAT: Memaksa AI mengikuti alur terakhir tanpa improvisasi jauh
+        prompt_lanjut = (
+            f"TUGAS: Lanjutkan adegan terakhir secara presisi.\n"
+            f"KONTROL KONTEKS:\n"
+            f"- JANGAN membuat sub-plot baru atau memperkenalkan karakter baru.\n"
+            f"- Fokus pada tindakan fisik atau kelanjutan dialog dari kalimat terakhir di [KONTEKS TERAKHIR].\n"
+            f"- Pastikan suasana dan nada cerita tetap konsisten.\n"
+            f"- Jika adegan terakhir adalah dialog, berikan respon balik dari lawan bicara."
+        )
+        
+        # Ambil history 5-7 baris terakhir agar AI punya memori jangka pendek yang kuat
+        out = await generate_response(prompt_lanjut, s["history"], s, True) 
+        
         if out:
-            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
-            await tampilkan_blok_terbaru(uid, context, s)
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"]})
+            await q.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
 
     # --- TOMBOL: TAMBAH NPC ---
     elif q.data == "add_npc":
