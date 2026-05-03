@@ -124,10 +124,8 @@ async def generate_narator(prompt, history, s):
         "- Fokus pada narasi yang menggerakkan alur cerita berdasarkan input user.\n"
         "FORMAT: Tampilkan narasi murni tanpa tag nama di awal teks."
     )
-    
     context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
     full_prompt = f"{system}\n\n[KONTEKS CERITA]\n{context}\n\n[INPUT USER UNTUK NARASI]\n{text}"
-
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
@@ -157,7 +155,6 @@ async def menu_utama(uid):
 # =================================================================
 async def msg(update, context):
     uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
-
     # --- STEP: NAMA AWAL ---
     if s["step"] == "set_name":
         await save(uid, {"name": text.capitalize(), "step": None})
