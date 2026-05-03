@@ -109,7 +109,7 @@ async def generate_response(prompt, history, s, force_options=False):
         except: continue
     return None
     #====================================
-    async def generate_narator(prompt, history, s):
+async def generate_narator(prompt, history, s):
     # Mengambil daftar nama untuk referensi subjek
     nama_utama = s["name"]
     daftar_npc = ", ".join([c['name'] for c in s.get("chars", [])])
