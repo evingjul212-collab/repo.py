@@ -211,7 +211,7 @@ async def msg(update, context):
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
             s["history"].append(f"[{tag}]: {out}")
-            await save(uid, {"history": s["history"], "step": None})
+            await save(uid, {"history": s["history"], "step": narator_input})
             await update.message.reply_text(f"--- {tag} ---\n\n[{tag}]: {out}", reply_markup=await menu_utama(uid))
         return       # --- STEP: TAMBAH NPC (NAMA) ---
     if s["step"] == "add_npc_name":
