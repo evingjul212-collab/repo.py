@@ -165,10 +165,8 @@ async def msg(update, context):
         loading_msg = await update.message.reply_text(f"⏳ {tag} sedang bertindak...")
         
         out = await generate_response(f"Lanjutkan dialog intens antara {tag} dan karakter lawan. "
-        f"{tag} melakukan: {text}. Buat percakapan yang romatis dewasa dan responsif.", 
-        s["history"],, s, True)
-        
-        if out:
+            f"{tag} melakukan: {text}. Buat percakapan yang romatis dewasa dan responsif.", s["history"], s, True)
+            if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
 
