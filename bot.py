@@ -266,7 +266,7 @@ async def callback(update, context):
     try: await q.answer()
     except:  pass
     # --- TOMBOL: LANJUT ---
-        if q.data == "lanjut":
+    if q.data == "lanjut":
         # Tentukan siapa POV yang sedang aktif
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
         
