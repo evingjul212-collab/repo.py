@@ -326,15 +326,33 @@ async def callback(update, context):
         await q.message.reply_text("📋 **Daftar Karakter:**", reply_markup=InlineKeyboardMarkup(kb))
 
     # --- TOMBOL: DETAIL KARAKTER (SELECTED) ---
+    # --- TOMBOL: DETAIL KARAKTER (SELECTED) ---
     elif q.data.startswith("sel_"):
         idx = int(q.data.split("_")[1])
         await save(uid, {"selected": idx})
+        
+        # Ambil data terbaru setelah save selected
+        s = await get_state(uid) 
+        
         name = s["name"] if idx == -1 else s["chars"][idx]["name"]
-        # ... kode lainnya ...
+        desc = s.get("desc_utama") if idx == -1 else s["chars"][idx].get("desc")
+        
+        # 1. Definisikan KB dulu
+        kb = [
+            [InlineKeyboardButton("🎮 Aksi", callback_data="act_run")],
+            [InlineKeyboardButton("🎬 New Story", callback_data="new_start")],
+            [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]
+        ]
+        
+        # 2. Baru panggil edit_message_text
         await q.edit_message_text(
-            f"👤 **Karakter Terpilih: {name}**\n━━━━━━━━━━━━━━━\n"
-            f"Sekarang kamu bisa **langsung mengetik aksi/dialog** untuk karakter ini atau gunakan menu di bawah:",
+            f"👤 **Detail Karakter: {name}**\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"📖 **Deskripsi:**\n{desc}\n\n"
+            f"💡 *Tips: Kamu bisa langsung mengetik pesan di sini untuk melakukan aksi sebagai {name}.*",
             reply_markup=InlineKeyboardMarkup(kb)
+        )
         )
 
     # --- TOMBOL: SAVE/LOAD/EDIT ---
