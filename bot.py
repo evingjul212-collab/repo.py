@@ -244,42 +244,7 @@ async def msg(update, context):
         await save(uid, {"chars": s["chars"], "step": None, "temp_val": None})
         await update.message.reply_text(f"✅ NPC **{new_npc['name']}** ditambahkan!", reply_markup=await menu_utama(uid)); return
 
-# --- STEP: NARATOR ---
-# ================= NARATOR =================
-    if s["step"] == "narator_input":
-        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
 
-        is_new = len(s["history"]) == 0
-
-    prompt_narator = (
-        f"Lanjutkan cerita berdasarkan input user berikut:\n{text}\n\n"
-        + ("Buat pembukaan cerita." if is_new else "WAJIB lanjut dari cerita terakhir, JANGAN ulang dari awal.")
-    )
-
-    out = await generate_response(prompt_narator, s["history"], s, True)
-
-    if out:
-        try:
-            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-        except:
-            pass
-
-        # simpan TANPA tag aneh
-        s["history"].append(out)
-
-        # 🔥 PENTING: JANGAN MATIKAN MODE
-        s["step"] = "narator_input"
-
-        s = await apply_updates(uid, s, text)
-
-        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
-    return
-
-    # fallback
-    await update.message.reply_text(
-        "Pilih menu dulu.",
-        reply_markup=await menu_utama(uid)
-    )
 # =================================================================
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
 # =================================================================
