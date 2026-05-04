@@ -83,38 +83,42 @@ async def tampilkan_dua_blok(uid, context, s):
 # [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
-    pov = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
-    info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
+    # Identifikasi POV saat ini
+    idx = s.get("selected", -1)
+    pov = s["name"] if idx == -1 else s["chars"][idx]["name"]
+    
+    # Ambil data semua karakter agar AI tidak lupa sifat mereka
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
+    
     system = (
-    f"Kamu adalah Penulis Novel Interaktif.\n"
-    f"POV UTAMA: {pov}\n\n"
-
-    "ATURAN POV KETAT:\n"
-    f"- Cerita WAJIB dari sudut pandang {pov}\n"
-    f"- HANYA {pov} yang boleh punya pikiran, perasaan, dan monolog internal\n"
-    f"- NPC lain HANYA boleh bertindak dan berbicara TANPA pikiran\n"
-    f"- DILARANG mengganti POV ke karakter lain\n"
-    f"- DILARANG menulis isi pikiran NPC\n\n"
-    f"- JANGAN MENGARANG fakta baru yang bertentangan dengan deskripsi karakter.\n"
-
-    "FORMAT:\n"
-    "- Narasi natural tanpa tag [NARRATOR]\n"
-    "- Dialog pakai tanda kutip\n"
-)
-
+        f"KAMU ADALAH PENULIS NOVEL INTERAKTIF.\n"
+        f"FOKUS POV: {pov}\n\n"
+        f"DATABASE KARAKTER (WAJIB DIPATUHI):\n"
+        f"- {s['name']} (Utama): {s.get('desc_utama')}\n"
+        f"{daftar_npc}\n\n"
+        f"ATURAN KETAT:\n"
+        f"1. FORMAT: Setiap paragraf WAJIB diawali tag [{pov}]:\n"
+        f"2. ANTI-HALU: Dilarang menambah kekuatan/sifat yang tidak ada di deskripsi.\n"
+        f"3. KONSISTENSI: Jangan mengarang fakta baru yang bertentangan dengan input user.\n"
+    )
     
     if force_options:
-        system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
+        system += "4. WAJIB akhiri dengan 4 pilihan aksi: A, B, C, D.\n"
     
-    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
+    # Menggunakan history[-5:] (Penjelasan di bawah)
+    context = "\n".join(history[-5:]) if history else "Cerita dimulai."
+    full_prompt = f"{system}\n\n[KONTEKS TERAKHIR]\n{context}\n\n[INSTRUKSI USER]\n{prompt}"
 
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
-            return resp.text.strip()
+            text_out = resp.text.strip()
+            
+            # Memastikan tag nama selalu ada di depan agar user tidak bingung
+            if not text_out.startswith("["):
+                text_out = f"[{pov}]: {text_out}"
+            return text_out
         except: continue
     return None
    #====================================
@@ -298,7 +302,7 @@ async def callback(update, context):
             except: pass
             
             formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
-            s["history"].append(f"[{tag}]: {out}")
+            s["history"].append(out) 
             await save(uid, {"history": s["history"]})
             await q.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
 
@@ -370,7 +374,8 @@ async def callback(update, context):
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
+            s["history"].append(out) 
+            await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
 
 # =================================================================
 # [8] MAIN RUNNER (POLLING) - FIX CONFLICT ERROR
