@@ -325,14 +325,32 @@ async def callback(update, context):
         kb = [[InlineKeyboardButton("🎮 Aksi", callback_data="act_run")], [InlineKeyboardButton("🎬 New Story", callback_data="new_start")], [InlineKeyboardButton("📝 Edit", callback_data=f"edit_{idx}")], [InlineKeyboardButton("⬅️ Kembali", callback_data="list_all")]]
         await q.edit_message_text(f"👤 **Detail Karakter**\n━━━━━━━━━━━━━━━\n📛 **Nama:** {name}\n📖 **Deskripsi:**\n{desc}", reply_markup=InlineKeyboardMarkup(kb))
 
-    # --- TOMBOL: SAVE/LOAD/EDIT ---
-    elif q.data == "save_manual": await save(uid, {"step": "save_manual_step"}); await q.message.reply_text("💾 Ketik nama Save Slot:")
-    elif q.data.startswith("edit_"): idx = q.data.split("_")[1]; await save(uid, {"step": f"editname_{idx}"}); await q.message.reply_text("Masukkan Nama Baru:")
-    elif q.data == "load_list":
-        items = await archives.find({"user_id": uid}).sort("_id", -1).to_list(10)
-        kb = [[InlineKeyboardButton(f"📖 {i['save_name']}", callback_data=f"load_{i['_id']}")] for i in items]
-        kb.append([InlineKeyboardButton("⬅️ Menu", callback_data="main_menu")])
-        await q.edit_message_text("Pilih Slot:", reply_markup=InlineKeyboardMarkup(kb))
+    # [A] Trigger Menu Slot (Saat klik tombol "💾 Save Slot")
+    if data == "save_manual":
+        keyboard = [
+            [InlineKeyboardButton(f"Slot {i}", callback_data=f"save_{i}")] for i in range(1, 6)
+        ]
+        keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data="menu_utama")])
+        await query.edit_message_text("Pilih Slot untuk MENYIMPAN cerita:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    # [B] Proses Eksekusi Simpan ke MongoDB
+    if data.startswith("save_"):
+        slot = data.split("_")[1]
+        s = await get_state(uid) # Ambil data yang sedang dimainkan
+        
+        # Pastikan data yang disimpan lengkap (termasuk plot_rencana baru)
+        data_siap_simpan = fix_state(s)
+        
+        # Simpan ke koleksi 'archives' (BUKAN 'users')
+        await archives.update_one(
+            {"uid": uid, "slot": slot},
+            {"$set": {"data": data_siap_simpan}},
+            upsert=True
+        )
+        await query.answer(f"✅ Slot {slot} Berhasil Disimpan!")
+        await query.edit_message_text(f"Berhasil menyimpan progres di Slot {slot}.", reply_markup=await menu_utama(uid))
+        return
 
     elif q.data.startswith("load_"):
         data = await archives.find_one({"_id": ObjectId(q.data.split("_")[1])})
