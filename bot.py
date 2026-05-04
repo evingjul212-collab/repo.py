@@ -35,6 +35,7 @@ def fix_state(s):
         "chars": s.get("chars", []),
         "selected": s.get("selected", -1),
         "temp_val": s.get("temp_val")
+        "plot_rencana": s.get("plot_rencana", "") # <--- Tambahkan ini
     }
 
 async def get_state(uid):
@@ -84,6 +85,7 @@ async def tampilkan_dua_blok(uid, context, s):
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
     # Identifikasi POV saat ini
+    plot_aktif = s.get("plot_rencana", "Ikuti alur alami.") # <--- Ambil data plot
     idx = s.get("selected", -1)
     pov = s["name"] if idx == -1 else s["chars"][idx]["name"]
     
@@ -95,6 +97,7 @@ async def generate_response(prompt, history, s, force_options=False):
         f"FOKUS POV: {pov}\n\n"
         f"DATABASE KARAKTER (WAJIB DIPATUHI):\n"
         f"- {s['name']} (Utama): {s.get('desc_utama')}\n"
+        f"RENCANA ALUR JANGKA PANJANG: {plot_aktif}\n" # <--- Masukkan ke sistem
         f"{daftar_npc}\n\n"
         f"ATURAN KETAT:\n"
         f"1. FORMAT: Setiap paragraf WAJIB diawali tag [{pov}]:\n"
@@ -122,23 +125,26 @@ async def generate_response(prompt, history, s, force_options=False):
         except: continue
     return None
    #====================================
-async def generate_narator(prompt, history, s):
-    # Mengambil daftar nama untuk referensi subjek
+async def generate_narator(user_input, history, s):
     nama_utama = s["name"]
     daftar_npc = ", ".join([c['name'] for c in s.get("chars", [])])
+    plot_aktif = s.get("plot_rencana", "Belum ada rencana alur.")
 
     system = (
-        "Kamu adalah Narator Novel yang deskriptif.\n"
-        "GAYA PENULISAN:\n"
-        "- Gunakan Sudut Pandang Orang Ketiga (Omniscient).\n"
-        "- JANGAN pernah gunakan kata 'Aku' atau 'Saya'.\n"
-        f"- Gunakan nama karakter seperti '{nama_utama}' atau NPC ({daftar_npc}) sebagai subjek.\n"
-        "- Ceritakan suasana, tindakan fisik, dan perkembangan situasi secara dramatis.\n"
-        "- Fokus pada narasi yang menggerakkan alur cerita berdasarkan input user.\n"
-        "FORMAT: Tampilkan narasi murni tanpa tag nama di awal teks."
+        "KAMU ADALAH NARATOR DESKRIPTIF & PENGENDALI ALUR.\n"
+        f"RENCANA ALUR SAAT INI: {plot_aktif}\n\n"
+        "TUGAS UTAMA:\n"
+        "1. Jika ada perubahan latar tempat/waktu (lompatan alur), WAJIB tuliskan kalimat transisinya secara puitis dan detail (Contoh: 'Matahari mulai tenggelam saat mereka akhirnya tiba...'). JANGAN langsung melompat tanpa narasi.\n"
+        "2. Gunakan Sudut Pandang Orang Ketiga.\n"
+        f"3. Fokus pada pergerakan {nama_utama} dan NPC ({daftar_npc}).\n"
+        "4. Ambil potongan rencana alur yang relevan saja, jangan habiskan semua plot dalam satu balasan.\n"
+        "FORMAT: Langsung narasi tanpa tag nama di depan."
     )
-    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n[KONTEKS CERITA]\n{context}\n\n[INPUT USER UNTUK NARASI]\n{prompt}"
+    
+    # Gunakan history -5 agar transisinya nyambung dengan kejadian sebelumnya [cite: 138, 153]
+    context = "\n".join(history[-5:]) if history else "Cerita baru dimulai."
+    full_prompt = f"{system}\n\n[KEJADIAN TERAKHIR]\n{context}\n\n[INPUT/AKSI NARASI]\n{user_input}"
+
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
@@ -170,17 +176,25 @@ async def msg(update, context):
 
     # --- [1] PRIORITAS UTAMA: STEP SPESIFIK ---
     # Taruh Narator di atas agar tidak tertimpa logika aksi
-    if s.get("step") == "narator_input":
-        loading_msg = await update.message.reply_text("🎭 Narator menyusun alur...")
+  if s.get("step") == "narator_input":
+        loading_msg = await update.message.reply_text("🎭 Narator memperbarui alur & menyusun cerita...")
+        
+        # Simpan input sebagai rencana plot jangka panjang
+        plot_baru = text
+        await save(uid, {"plot_rencana": plot_baru})
+        s["plot_rencana"] = plot_baru # Update local state
+        
         out = await generate_narator(text, s["history"], s)
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
+            
+            # Tambahkan ke history dengan tag agar konsisten [cite: 106, 147]
             s["history"].append(f"[NARRATOR]: {out}")
             await save(uid, {"history": s["history"], "step": None})
+            
             await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
         return
-
     if s["step"] == "set_name":
         await save(uid, {"name": text.capitalize(), "step": None})
         await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid))
