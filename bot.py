@@ -86,7 +86,6 @@ async def generate_response(prompt, history, s, force_options=False):
     pov = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
     info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
-    
     system = (
     f"Kamu adalah Penulis Novel Interaktif.\n"
     f"POV UTAMA: {pov}\n\n"
@@ -94,9 +93,10 @@ async def generate_response(prompt, history, s, force_options=False):
     "ATURAN POV KETAT:\n"
     f"- Cerita WAJIB dari sudut pandang {pov}\n"
     f"- HANYA {pov} yang boleh punya pikiran, perasaan, dan monolog internal\n"
-    f"- NPC lain (termasuk Lia) HANYA boleh bertindak dan berbicara TANPA pikiran\n"
+    f"- NPC lain HANYA boleh bertindak dan berbicara TANPA pikiran\n"
     f"- DILARANG mengganti POV ke karakter lain\n"
     f"- DILARANG menulis isi pikiran NPC\n\n"
+    f"- JANGAN MENGARANG fakta baru yang bertentangan dengan deskripsi karakter.\n"
 
     "FORMAT:\n"
     "- Narasi natural tanpa tag [NARRATOR]\n"
