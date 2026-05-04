@@ -176,23 +176,19 @@ async def msg(update, context):
 
     # --- [1] PRIORITAS UTAMA: STEP SPESIFIK ---
     # Taruh Narator di atas agar tidak tertimpa logika aksi
-  if s.get("step") == "narator_input":
+    if s.get("step") == "narator_input":
         loading_msg = await update.message.reply_text("🎭 Narator memperbarui alur & menyusun cerita...")
-        
         # Simpan input sebagai rencana plot jangka panjang
         plot_baru = text
         await save(uid, {"plot_rencana": plot_baru})
         s["plot_rencana"] = plot_baru # Update local state
-        
         out = await generate_narator(text, s["history"], s)
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
-            
             # Tambahkan ke history dengan tag agar konsisten [cite: 106, 147]
             s["history"].append(f"[NARRATOR]: {out}")
             await save(uid, {"history": s["history"], "step": None})
-            
             await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
         return
     if s["step"] == "set_name":
