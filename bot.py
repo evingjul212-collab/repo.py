@@ -34,7 +34,7 @@ def fix_state(s):
         "history": s.get("history", []),
         "chars": s.get("chars", []),
         "selected": s.get("selected", -1),
-        "temp_val": s.get("temp_val")
+        "temp_val": s.get("temp_val"),
         "plot_rencana": s.get("plot_rencana", "") # <--- Tambahkan ini
     }
 
