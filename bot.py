@@ -156,8 +156,8 @@ async def msg(update, context):
         await archives.insert_one(save_data)
         await save(uid, {"step": None})
         await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
-       # --- STEP: ACTION (INPUT BEBAS) ---
-    if s["step"] == "action":
+    # --- STEP: ACTION (INPUT BEBAS) ---
+    if s["step"] == "action" or s["step"] is None:
         # Tentukan tag nama (User Utama atau NPC)
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
         
@@ -240,11 +240,7 @@ if s.get("step") == "narator_input":
             await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
         return
 
-    # fallback
-    await update.message.reply_text(
-        "Pilih menu dulu.",
-        reply_markup=await menu_utama(uid)
-    )
+  
 # =================================================================
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
 # =================================================================
