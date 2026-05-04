@@ -1,4 +1,4 @@
-#============== sudah update
+#============== jadi tapi belum update
 
 import os 
 import asyncio
@@ -83,58 +83,24 @@ async def tampilkan_dua_blok(uid, context, s):
 # [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
-    pov = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
-    info_utama = f"Tokoh Utama: {s['name']} - Deskripsi: {s.get('desc_utama', '')}"
-    daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
+    pov_name = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
     
     system = (
-    f"Kamu adalah Penulis Novel Interaktif.\n"
-    f"POV UTAMA: {pov}\n\n"
-
-    "ATURAN POV KETAT:\n"
-    f"- Cerita WAJIB dari sudut pandang {pov}\n"
-    f"- HANYA {pov} yang boleh punya pikiran, perasaan, dan monolog internal\n"
-    f"- NPC lain (termasuk Lia) HANYA boleh bertindak dan berbicara TANPA pikiran\n"
-    f"- DILARANG mengganti POV ke karakter lain\n"
-    f"- DILARANG menulis isi pikiran NPC\n\n"
-
-    "FORMAT:\n"
-    "- Narasi natural tanpa tag [NARRATOR]\n"
-    "- Dialog pakai tanda kutip\n"
-)
-
+        f"Kamu adalah Penulis Novel dewasa Interaktif yang ahli dalam dialog intens.\n"
+        f"FOKUS POV: {pov_name} (Gunakan kata ganti 'Aku').\n\n"
+        "ATURAN DIALOG & INTERAKSI:\n"
+        "- PERBANYAK DIALOG antar karakter. Buat percakapan yang terasa hidup dan reaktif.\n"
+        "- Fokus pada ketegangan verbal, godaan, atau konflik dalam percakapan.\n"
+        "- Kurangi narasi deskripsi lingkungan yang panjang; fokus pada gerakan tubuh saat berbicara (body language).\n"
+        "- Setiap tindakan 'Aku' harus memicu respon langsung dari karakter lawan bicara.\n"
+    )
     
     if force_options:
-        system += "\nWAJIB akhiri dengan 4 pilihan aksi: A, B, C, D."
+        system += "\nWAJIB akhiri dengan 4 pilihan aksi (A, B, C, D) yang memicu kelanjutan dialog."
     
     context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n{context}\n\n[INSTRUKSI SAAT INI]\n{prompt}"
+    full_prompt = f"{system}\n\n[KONTEKS TERAKHIR]\n{context}\n\n[INSTRUKSI AKSI SEKARANG]\n{prompt}"
 
-    for m in MODELS:
-        try:
-            loop = asyncio.get_event_loop()
-            resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
-            return resp.text.strip()
-        except: continue
-    return None
-   #====================================
-async def generate_narator(prompt, history, s):
-    # Mengambil daftar nama untuk referensi subjek
-    nama_utama = s["name"]
-    daftar_npc = ", ".join([c['name'] for c in s.get("chars", [])])
-
-    system = (
-        "Kamu adalah Narator Novel yang deskriptif.\n"
-        "GAYA PENULISAN:\n"
-        "- Gunakan Sudut Pandang Orang Ketiga (Omniscient).\n"
-        "- JANGAN pernah gunakan kata 'Aku' atau 'Saya'.\n"
-        f"- Gunakan nama karakter seperti '{nama_utama}' atau NPC ({daftar_npc}) sebagai subjek.\n"
-        "- Ceritakan suasana, tindakan fisik, dan perkembangan situasi secara dramatis.\n"
-        "- Fokus pada narasi yang menggerakkan alur cerita berdasarkan input user.\n"
-        "FORMAT: Tampilkan narasi murni tanpa tag nama di awal teks."
-    )
-    context = "\n".join(history[-3:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n[KONTEKS CERITA]\n{context}\n\n[INPUT USER UNTUK NARASI]\n{prompt}"
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
@@ -159,61 +125,90 @@ async def menu_utama(uid):
     ]
     return InlineKeyboardMarkup(kb)
 
+# =================================================================
+# [6] TEXT MESSAGE HANDLER (LOGIC BY STEP)
+# =================================================================
 async def msg(update, context):
-    uid = update.effective_user.id
-    text = update.message.text
-    s = await get_state(uid)
+    uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
 
-    # --- [1] PRIORITAS UTAMA: STEP SPESIFIK ---
-    # Taruh Narator di atas agar tidak tertimpa logika aksi
-    if s.get("step") == "narator_input":
-        loading_msg = await update.message.reply_text("🎭 Narator menyusun alur...")
-        out = await generate_narator(text, s["history"], s)
-        if out:
-            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            except: pass
-            s["history"].append(f"[NARRATOR]: {out}")
-            await save(uid, {"history": s["history"], "step": None})
-            await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
-        return
-
+    # --- STEP: NAMA AWAL ---
     if s["step"] == "set_name":
         await save(uid, {"name": text.capitalize(), "step": None})
-        await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid))
-        return
+        await update.message.reply_text(f"Halo {text.capitalize()}!", reply_markup=await menu_utama(uid)); return
 
-    # --- [2] PROSES EDIT & SAVE (STEP BERAWALAN TERTENTU) ---
-    if s["step"] and (s["step"].startswith("edit") or s["step"].startswith("add_npc") or s["step"] == "save_manual_step"):
-        # ... (Logika edit dan save tetap seperti kode asli kamu) ...
-        # Pastikan ada return di setiap akhir blok step ini
-        return
+    # --- STEP: EDIT KARAKTER (NAMA) ---
+    if s["step"] and s["step"].startswith("editname_"):
+        idx = int(s["step"].split("_")[1])
+        await save(uid, {"temp_val": text, "step": f"editdesc_{idx}"})
+        await update.message.reply_text(f"Nama baru: {text}. Sekarang masukkan DESKRIPSI baru:"); return
+    
+    # --- STEP: EDIT KARAKTER (DESKRIPSI) ---
+    if s["step"] and s["step"].startswith("editdesc_"):
+        idx = int(s["step"].split("_")[1])
+        if idx == -1: s["name"], s["desc_utama"] = s["temp_val"], text
+        else: s["chars"][idx]["name"], s["chars"][idx]["desc"] = s["temp_val"], text
+        await save(uid, {"name": s["name"], "desc_utama": s["desc_utama"], "chars": s["chars"], "step": None, "temp_val": None})
+        await update.message.reply_text("✨ Karakter diperbarui!", reply_markup=await menu_utama(uid)); return
 
-    # --- [3] LOGIKA FALLBACK (AKSI OTOMATIS) ---
-    # Jika step None atau 'action', kita proses sebagai aksi karakter
-    if s["step"] is None or s["step"] == "action":
-        if not s["history"]:
-            await update.message.reply_text("Mulai cerita dulu bossku.", reply_markup=await menu_utama(uid))
-            return
-
-        # Cek Pilihan A/B/C/D dulu
-        if re.match(r'^[a-dA-D]$', text.strip()):
-            out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
-            if out:
-                s["history"].append(out); await save(uid, {"history": s["history"]})
-                await tampilkan_dua_blok(uid, context, s)
-            return
-
-        # Jika teks bebas, jadikan aksi POV yang terpilih
+    # --- STEP: SAVE MANUAL (NAMA SLOT) ---
+    if s["step"] == "save_manual_step":
+        save_data = {"user_id": uid, "save_name": text, "history": s["history"], "chars": s["chars"], "name": s["name"], "desc_utama": s.get("desc_utama", "Tokoh Utama")}
+        await archives.insert_one(save_data)
+        await save(uid, {"step": None})
+        await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
+      # --- STEP: ACTION (INPUT BEBAS) ---
+   # --- STEP: ACTION (INPUT BEBAS) ---
+    if s["step"] == "action":
+        # Tentukan tag nama (User Utama atau NPC)
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
-        loading_msg = await update.message.reply_text(f"⏳ {tag} merespon...")
-        out = await generate_response(f"Aksi: {text}", s["history"], s, True)
+        
+        loading_msg = await update.message.reply_text(f"⏳ {tag} sedang bertindak...")
+        
+        out = await generate_response(f"Lanjutkan cerita di mana {tag} melakukan aksi: {text}. JANGAN tampilkan ulang pilihan.", s["history"], s, True)
+        
         if out:
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
+
+            # Format hasil akhir dengan Header dan Tag sesuai permintaanmu
+            formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
+            
+            # Simpan ke history (tanpa header dekoratif agar konteks AI tetap bersih)
             s["history"].append(f"[{tag}]: {out}")
+            
             await save(uid, {"history": s["history"], "step": None})
-            await update.message.reply_text(f"--- {tag} ---\n\n[{tag}]: {out}", reply_markup=await menu_utama(uid))
-        return       # --- STEP: TAMBAH NPC (NAMA) ---
+            await update.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
+            return
+
+    # --- STEP: NARATOR ---
+    if s["step"] == "narator_input":
+        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
+        is_new = len(s["history"]) == 0
+        
+        prompt_narator = (
+            f"Lanjutkan cerita berdasarkan input user berikut:\n{text}\n\n"
+            + ("Buat pembukaan cerita." if is_new else "WAJIB lanjut dari cerita terakhir, JANGAN ulang dari awal.")
+        )
+        out = await generate_response(prompt_narator, s["history"], s, True)
+
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+
+            s["history"].append(out)
+            # s["step"] = "narator_input"  # Tetap di mode narator (opsional)
+            await save(uid, {"history": s["history"], "step": "narator_input"}) # Lu lupa save step/history di sini
+            await update.message.reply_text(out, reply_markup=await menu_utama(uid))
+        return
+
+    # --- STEP: PILIHAN A/B/C/D ---
+    if re.match(r'^[a-dA-D]$', text.strip()) and s["history"]:
+        out = await generate_response(f"Pilih {text.upper()}", s["history"], s, True)
+        if out:
+            s["history"].append(out); await save(uid, {"history": s["history"]})
+            await tampilkan_dua_blok(uid, context, s); return
+
+    # --- STEP: TAMBAH NPC (NAMA) ---
     if s["step"] == "add_npc_name":
         await save(uid, {"temp_val": text, "step": "add_npc_desc"})
         await update.message.reply_text(f"Nama: **{text}**\n\nSekarang masukkan **Deskripsi** NPC tersebut:"); return
@@ -261,9 +256,6 @@ async def msg(update, context):
         "Pilih menu dulu.",
         reply_markup=await menu_utama(uid)
     )
-
-
-
 # =================================================================
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
 # =================================================================
@@ -275,12 +267,33 @@ async def callback(update, context):
     except:  pass
     # --- TOMBOL: LANJUT ---
     if q.data == "lanjut":
-        loading_msg = await q.message.reply_text("⏳ Menyusun dialog intens...")
-        out = await generate_response("Lanjutkan alur cerita, ±1000 karakter.", s["history"], s, True) 
+        # Tentukan siapa POV yang sedang aktif
+        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
+        
+        loading_msg = await q.message.reply_text(f"⏳ {tag} melanjutkan pembicaraan...")
+        
+        # Instruksi khusus untuk "Lanjut": Fokus pada perkembangan dialog dan respon lawan bicara
+        prompt_lanjut = (
+            f"Lanjutkan adegan ini secara natural. Fokus pada interaksi dialog yang lebih dalam "
+            f"dan reaksi emosional antara {tag} dan karakter di hadapannya. "
+            f"Jangan biarkan cerita berhenti, buat suasana semakin intens."
+        )
+        
+        out = await generate_response(prompt_lanjut, s["history"], s, True) 
+        
         if out:
-            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]})
-            await tampilkan_blok_terbaru(uid, context, s)
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            # Format dengan header dan tag POV seperti permintaanmu
+            formatted_story = f"--- {tag} ---\n\n[{tag}]: {out}"
+            
+            # Simpan ke history
+            s["history"].append(f"[{tag}]: {out}")
+            await save(uid, {"history": s["history"]})
+            
+            # Tampilkan pesan terbaru dengan format yang sudah rapi
+            await q.message.reply_text(formatted_story, reply_markup=await menu_utama(uid))
 
     # --- TOMBOL: TAMBAH NPC ---
     elif q.data == "add_npc":
