@@ -156,8 +156,7 @@ async def msg(update, context):
         await archives.insert_one(save_data)
         await save(uid, {"step": None})
         await update.message.reply_text(f"✅ Slot '{text}' berhasil disimpan!", reply_markup=await menu_utama(uid)); return
-      # --- STEP: ACTION (INPUT BEBAS) ---
-   # --- STEP: ACTION (INPUT BEBAS) ---
+       # --- STEP: ACTION (INPUT BEBAS) ---
     if s["step"] == "action":
         # Tentukan tag nama (User Utama atau NPC)
         tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
@@ -222,34 +221,24 @@ async def msg(update, context):
 
 # --- STEP: NARATOR ---
 # ================= NARATOR =================
-    if s["step"] == "narator_input":
-        loading_msg = await update.message.reply_text("✍️ Narator sedang menyusun cerita...")
-
-        is_new = len(s["history"]) == 0
-
-    prompt_narator = (
-        f"Lanjutkan cerita berdasarkan input user berikut:\n{text}\n\n"
-        + ("Buat pembukaan cerita." if is_new else "WAJIB lanjut dari cerita terakhir, JANGAN ulang dari awal.")
-    )
-
-    out = await generate_response(prompt_narator, s["history"], s, True)
-
-    if out:
-        try:
-            await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-        except:
-            pass
-
-        # simpan TANPA tag aneh
-        s["history"].append(out)
-
-        # 🔥 PENTING: JANGAN MATIKAN MODE
-        s["step"] = "narator_input"
-
-        s = await apply_updates(uid, s, text)
-
-        await update.message.reply_text(out, reply_markup=await menu_utama(uid))
-    return
+if s.get("step") == "narator_input":
+        loading_msg = await update.message.reply_text("🎭 Narator memperbarui alur & menyusun cerita...")
+        
+        # Simpan input sebagai rencana plot jangka panjang
+        plot_baru = text
+        await save(uid, {"plot_rencana": plot_baru})
+        s["plot_rencana"] = plot_baru # Update local state
+        
+        out = await generate_narator(text, s["history"], s)
+        if out:
+            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+            
+            # Tambahkan ke history dengan tag agar konsisten [cite: 106, 147]
+            s["history"].append(f"[NARRATOR]: {out}")
+            await save(uid, {"history": s["history"], "step": None})
+            await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
+        return
 
     # fallback
     await update.message.reply_text(
