@@ -84,41 +84,32 @@ async def tampilkan_dua_blok(uid, context, s):
 # [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
 # =================================================================
 async def generate_response(prompt, history, s, force_options=False):
-    # Identifikasi POV saat ini
-    plot_aktif = s.get("plot_rencana", "Ikuti alur alami.") # <--- Ambil data plot
     idx = s.get("selected", -1)
     pov = s["name"] if idx == -1 else s["chars"][idx]["name"]
-    
-    # Ambil data semua karakter agar AI tidak lupa sifat mereka
     daftar_npc = "\n".join([f"- {c['name']}: {c['desc']}" for c in s.get("chars", [])])
-    
+    plot_aktif = s.get("plot_rencana", "Alur bebas.")
+
     system = (
         f"KAMU ADALAH PENULIS NOVEL INTERAKTIF.\n"
-        f"FOKUS POV: {pov}\n\n"
-        f"DATABASE KARAKTER (WAJIB DIPATUHI):\n"
-        f"- {s['name']} (Utama): {s.get('desc_utama')}\n"
-        f"RENCANA ALUR JANGKA PANJANG: {plot_aktif}\n" # <--- Masukkan ke sistem
-        f"{daftar_npc}\n\n"
-        f"ATURAN KETAT:\n"
-        f"1. FORMAT: Setiap paragraf WAJIB diawali tag [{pov}]:\n"
-        f"2. ANTI-HALU: Dilarang menambah kekuatan/sifat yang tidak ada di deskripsi.\n"
-        f"3. KONSISTENSI: Jangan mengarang fakta baru yang bertentangan dengan input user.\n"
+        f"POV: {pov}\n"
+        f"RENCANA ALUR JANGKA PANJANG: {plot_aktif}\n\n"
+        "ATURAN KETAT:\n"
+        f"1. FORMAT: Awali dengan [{pov}]:\n"
+        "2. KONSISTENSI: Jangan habiskan rencana alur sekaligus. Biarkan cerita mengalir perlahan.\n"
+        "3. TRANSISI: Tuliskan narasi lompatan waktu jika memang terjadi perpindahan lokasi.\n"
     )
-    
+
     if force_options:
-        system += "4. WAJIB akhiri dengan 4 pilihan aksi: A, B, C, D.\n"
-    
-    # Menggunakan history[-5:] (Penjelasan di bawah)
+        system += "\n4. WAJIB berikan 4 pilihan aksi (A, B, C, D) di akhir pesan."
+
     context = "\n".join(history[-5:]) if history else "Cerita dimulai."
-    full_prompt = f"{system}\n\n[KONTEKS TERAKHIR]\n{context}\n\n[INSTRUKSI USER]\n{prompt}"
+    full_prompt = f"{system}\n\n[KONTEKS]\n{context}\n\n[AKSI USER]\n{prompt}"
 
     for m in MODELS:
         try:
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(None, lambda: client_ai.models.generate_content(model=m, contents=full_prompt))
             text_out = resp.text.strip()
-            
-            # Memastikan tag nama selalu ada di depan agar user tidak bingung
             if not text_out.startswith("["):
                 text_out = f"[{pov}]: {text_out}"
             return text_out
@@ -127,23 +118,21 @@ async def generate_response(prompt, history, s, force_options=False):
    #====================================
 async def generate_narator(user_input, history, s):
     nama_utama = s["name"]
-    daftar_npc = ", ".join([c['name'] for c in s.get("chars", [])])
-    plot_aktif = s.get("plot_rencana", "Belum ada rencana alur.")
+    plot_aktif = s.get("plot_rencana", "Ikuti alur alami.")
 
     system = (
-        "KAMU ADALAH NARATOR DESKRIPTIF & PENGENDALI ALUR.\n"
-        f"RENCANA ALUR SAAT INI: {plot_aktif}\n\n"
-        "TUGAS UTAMA:\n"
-        "1. Jika ada perubahan latar tempat/waktu (lompatan alur), WAJIB tuliskan kalimat transisinya secara puitis dan detail (Contoh: 'Matahari mulai tenggelam saat mereka akhirnya tiba...'). JANGAN langsung melompat tanpa narasi.\n"
-        "2. Gunakan Sudut Pandang Orang Ketiga.\n"
-        f"3. Fokus pada pergerakan {nama_utama} dan NPC ({daftar_npc}).\n"
-        "4. Ambil potongan rencana alur yang relevan saja, jangan habiskan semua plot dalam satu balasan.\n"
-        "FORMAT: Langsung narasi tanpa tag nama di depan."
+        "KAMU ADALAH NARATOR DESKRIPTIF.\n"
+        f"RENCANA BESAR ALUR: {plot_aktif}\n\n"
+        "ATURAN PENTING:\n"
+        "1. JANGAN HABISKAN SEMUA PLOT! Ambil hanya potongan awal atau potongan kecil yang relevan dengan input saat ini.\n"
+        "2. DESKRIPSI TRANSISI: Jika plot melibatkan lompatan waktu/tempat, kamu WAJIB menuliskan prosesnya (Contoh: 'Perjalanan memakan waktu berjam-jam, matahari mulai terbenam saat...').\n"
+        "3. TUGASMU: Menjembatani alur lama ke alur baru sesuai rencana.\n"
+        "4. GAYA BAHASA: Deskriptif, atmosferik, dan menggunakan sudut pandang orang ketiga.\n"
+        "FORMAT: Langsung narasi tanpa tag nama."
     )
     
-    # Gunakan history -5 agar transisinya nyambung dengan kejadian sebelumnya [cite: 138, 153]
-    context = "\n".join(history[-5:]) if history else "Cerita baru dimulai."
-    full_prompt = f"{system}\n\n[KEJADIAN TERAKHIR]\n{context}\n\n[INPUT/AKSI NARASI]\n{user_input}"
+    context = "\n".join(history[-5:]) if history else "Cerita dimulai."
+    full_prompt = f"{system}\n\n[INGATAN CERITA]\n{context}\n\n[INPUT NARATOR]\n{user_input}"
 
     for m in MODELS:
         try:
