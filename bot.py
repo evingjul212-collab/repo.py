@@ -349,6 +349,29 @@ async def callback(update, context):
             try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
             except: pass
             s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
+   #=====================================================
+    if q.data == "show_history":
+        if not s.get("history"):
+            await q.message.reply_text("❌ Riwayat masih kosong, Bos. Gas koding dulu!")
+            return
+
+        # Gabungkan semua history jadi satu string panjang
+        isi_cerita = "\n\n".join(s["history"])
+        
+        # Obok-obok dikit biar rapi di TXT
+        isi_cerita = isi_cerita.replace("[NARRATOR]:", "🎬 [NARASI]:")
+        
+        # Bungkus jadi file TXT di memori (io.BytesIO)
+        file_txt = io.BytesIO(isi_cerita.encode('utf-8'))
+        file_txt.name = f"History_Cerita_{s.get('name', 'User')}.txt"
+
+        # Kirim file TXT ke Telegram
+        await context.bot.send_document(
+            chat_id=uid,
+            document=file_txt,
+            caption="📜 Ini riwayat lengkap ceritanya dalam format .txt, Bos!",
+            reply_markup=await menu_utama(uid)
+        )
 
 # =================================================================
 # [8] MAIN RUNNER (POLLING) - FIX CONFLICT ERROR
