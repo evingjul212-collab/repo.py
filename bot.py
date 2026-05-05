@@ -1,6 +1,7 @@
 #============== jadi tapi belum update
 
 import os 
+import io
 import asyncio
 import re 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
