@@ -91,8 +91,8 @@ async def generate_response(prompt, history, s, force_options=False):
         f"FOKUS POV: {pov_name} (Gunakan kata ganti 'Aku').\n\n"
         "ATURAN DIALOG & INTERAKSI:\n"
         "- PERBANYAK DIALOG antar karakter. Buat percakapan yang terasa hidup dan reaktif.\n"
-        "- Fokus pada ketegangan verbal, godaan, atau konflik dalam percakapan.\n"
-        "- Kurangi narasi deskripsi lingkungan yang panjang; fokus pada gerakan tubuh saat berbicara (body language).\n"
+        "- Fokus pada ketegangan verbal, godaan, atau konflik romansa dalam percakapan.\n"
+        "- Kurangi narasi deskripsi lingkungan yang panjang; fokus pada gerakan tubuh saat berbicara (body language), bersahabat.\n"
         "- Setiap tindakan 'Aku' harus memicu respon langsung dari karakter lawan bicara.\n"
     )
     
@@ -260,9 +260,9 @@ async def callback(update, context):
         
         # Instruksi khusus untuk "Lanjut": Fokus pada perkembangan dialog dan respon lawan bicara
         prompt_lanjut = (
-            f"Lanjutkan adegan ini secara natural. Fokus pada interaksi dialog yang lebih dalam "
-            f"dan reaksi emosional antara {tag} dan karakter di hadapannya. "
-            f"Jangan biarkan cerita berhenti, buat suasana semakin intens."
+            f"Lanjutkan adegan ini secara natural. Fokus pada interaksi dialog yang lebih dalam dan bersahabat"
+            f"dan reaksi emosional antara {tag} dan karakter di hadapannya yang lugas. "
+            f"Jangan biarkan cerita berhenti, buat suasana semakin intens nuansa romansa."
         )
         
         out = await generate_response(prompt_lanjut, s["history"], s, True) 
