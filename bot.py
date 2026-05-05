@@ -79,6 +79,57 @@ async def tampilkan_dua_blok(uid, context, s):
         if len(teks) > 4000: teks = teks[:3900] + "..." # Jaga-jaga kalau 1 blok saja sudah 4000
         
     await context.bot.send_message(chat_id=uid, text=teks, reply_markup=await menu_utama(uid))
+# =================================================================
+# [LOGIKA REGEN - ANTI HALU & FOKUS ALUR]
+# =================================================================
+
+async def handle_regen(update, context):
+    q = update.callback_query
+    uid = q.from_user.id
+    s = await get_state(uid)
+    
+    if not s.get("history"):
+        await q.answer("❌ Belum ada cerita yang bisa di-regen!", show_alert=True)
+        return
+
+    # 1. Ambil input terakhir dari history (biasanya diawali dengan nama user/karakter)
+    # Kita cari entri terakhir yang merupakan input user untuk di-generate ulang
+    last_action = ""
+    for entry in reversed(s["history"]):
+        if entry.startswith(f"[{s['name']}]:"):
+            last_action = entry.replace(f"[{s['name']}]:", "").strip()
+            break
+    
+    if not last_action:
+        await q.answer("❌ Tidak ditemukan input aksi terakhir untuk di-regen.", show_alert=True)
+        return
+
+    # 2. Hapus respon AI terakhir yang dianggap "halu/jelek" dari history
+    # Kita hapus satu entri terakhir (respon AI) agar bisa diganti yang baru
+    s["history"].pop() 
+
+    await q.message.edit_text("🔄 Sedang memperbaiki alur cerita... Mohon tunggu.")
+
+    # 3. Prompt khusus untuk REGEN (Instruksi lebih ketat agar tidak melebar)
+    regen_prompt = (
+        f"PERBAIKI RESPON SEBELUMNYA. Input user: '{last_action}'.\n"
+        "KETENTUAN: Jangan terlalu serius, jangan melebar jauh, fokus pada interaksi "
+        "langsung antara NPC dan Tokoh Utama. Gunakan bahasa yang natural dan logis."
+    )
+
+    # 4. Generate ulang
+    new_out = await generate_response(regen_prompt, s["history"], s, force_options=True)
+    
+    if new_out:
+        tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
+        s["history"].append(f"[{tag}]: {new_out}")
+        await save(uid, {"history": s["history"]})
+        
+        # Tampilkan hasil baru
+        await q.message.reply_text(f"--- REGEN RESULT ---\n\n[{tag}]: {new_out}", 
+                                  reply_markup=await menu_utama(uid))
+    else:
+        await q.message.reply_text("⚠️ Gagal regen, coba lagi nanti.", reply_markup=await menu_utama(uid))
 
 # =================================================================
 # [4] AI CORE ENGINE (GENERATOR) - ANTI-META DATA PEAKING
@@ -342,14 +393,8 @@ async def callback(update, context):
         await save(uid, {"step": "narator_input"})
         await q.message.reply_text("🎭 Ketik alur cerita (awal/lanjutan):")
 
-    elif q.data == "regen":
-        if not s["history"]: return
-        loading_msg = await q.message.reply_text("🔄 Menulis ulang...")
-        s["history"].pop(); out = await generate_response("Ulangi adegan terakhir, ±1000 karakter.", s["history"], s, True)
-        if out:
-            try: await context.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
-            except: pass
-            s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
+   elif q.data == "regen":
+        await handle_regen(update, context)
    #=====================================================
     elif q.data == "show_history":
         if not s.get("history"):
