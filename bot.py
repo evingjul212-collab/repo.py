@@ -221,7 +221,7 @@ async def msg(update, context):
 
 # --- STEP: NARATOR ---
 # ================= NARATOR =================
-if s.get("step") == "narator_input":
+    if s.get("step") == "narator_input":
         loading_msg = await update.message.reply_text("🎭 Narator memperbarui alur & menyusun cerita...")
         
         # Simpan input sebagai rencana plot jangka panjang
