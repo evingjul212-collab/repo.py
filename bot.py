@@ -393,7 +393,7 @@ async def callback(update, context):
         await save(uid, {"step": "narator_input"})
         await q.message.reply_text("🎭 Ketik alur cerita (awal/lanjutan):")
 
-   elif q.data == "regen":
+    elif q.data == "regen":
         await handle_regen(update, context)
    #=====================================================
     elif q.data == "show_history":
