@@ -292,7 +292,7 @@ async def msg(update, context):
             await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
         return
-if s.get("step") == "regen_input":
+    if s.get("step") == "regen_input":
         loading = await update.message.reply_text("🔄 Memperbaiki alur berdasarkan masukanmu...")
         
         # 1. Cari aksi terakhir user sebelum respon AI yang mau dibuang
