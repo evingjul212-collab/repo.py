@@ -350,7 +350,7 @@ async def callback(update, context):
             except: pass
             s["history"].append(f"[STORY]:\n{out}"); await save(uid, {"history": s["history"]}); await tampilkan_blok_terbaru(uid, context, s)
    #=====================================================
-    if q.data == "show_history":
+    elif q.data == "show_history":
         if not s.get("history"):
             await q.message.reply_text("❌ Riwayat masih kosong, Bos. Gas koding dulu!")
             return
