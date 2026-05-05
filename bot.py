@@ -182,6 +182,7 @@ async def menu_utama(uid):
 # =================================================================
 async def msg(update, context):
     uid = update.effective_user.id; text = update.message.text; s = await get_state(uid)
+    
 
     # --- STEP: NAMA AWAL ---
     if s["step"] == "set_name":
@@ -291,7 +292,40 @@ async def msg(update, context):
             await save(uid, {"history": s["history"], "step": None})
             await update.message.reply_text(f"--- NARRATOR ---\n\n{out}", reply_markup=await menu_utama(uid))
         return
+if s.get("step") == "regen_input":
+        loading = await update.message.reply_text("🔄 Memperbaiki alur berdasarkan masukanmu...")
+        
+        # 1. Cari aksi terakhir user sebelum respon AI yang mau dibuang
+        last_action = ""
+        for entry in reversed(s["history"]):
+            if entry.startswith(f"[{s['name']}]:"):
+                last_action = entry.replace(f"[{s['name']}]:", "").strip()
+                break
+        
+        # 2. Buang respon AI terakhir yang jelek
+        if len(s["history"]) > 0:
+            s["history"].pop()
 
+        # 3. Prompt Khusus dengan Instruksi Perbaikan dari User
+        prompt_perbaikan = (
+            f"TUGAS: Tulis ulang respon terakhir.\n"
+            f"INPUT AKSI USER: '{last_action}'\n"
+            f"PERINTAH PERBAIKAN: {text}\n\n"
+            "Pastikan hasil kali ini lebih natural, tidak halu, dan tetap fokus pada alur."
+        )
+
+        # 4. Generate Ulang
+        new_out = await generate_response(prompt_perbaikan, s["history"], s, force_options=True)
+        
+        if new_out:
+            await context.bot.delete_message(chat_id=uid, message_id=loading.message_id)
+            tag = s["name"] if s.get("selected", -1) == -1 else s["chars"][s["selected"]]["name"]
+            s["history"].append(f"[{tag}]: {new_out}")
+            
+            await save(uid, {"history": s["history"], "step": None}) # Reset step ke None
+            await update.message.reply_text(f"✅ **Alur Diperbaiki:**\n\n[{tag}]: {new_out}", 
+                                           reply_markup=await menu_utama(uid))
+        return
   
 # =================================================================
 # [7] CALLBACK QUERY HANDLER (BUTTON LOGIC)
@@ -394,7 +428,12 @@ async def callback(update, context):
         await q.message.reply_text("🎭 Ketik alur cerita (awal/lanjutan):")
 
     elif q.data == "regen":
-        await handle_regen(update, context)
+        if not s.get("history"):
+            await q.answer("❌ Belum ada cerita untuk di-regen!", show_alert=True)
+            return
+            
+        await save(uid, {"step": "regen_input"}) # Set status tunggu input perbaikan
+        await q.message.reply_text("📝 **Input Perbaikan:**\nSebutkan apa yang ingin diperbaiki dari respon terakhir? (Contoh: 'Jangan terlalu serius' atau 'Buat percakapannya lebih santai')")
    #=====================================================
     elif q.data == "show_history":
         if not s.get("history"):
