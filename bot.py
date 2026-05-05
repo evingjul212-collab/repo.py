@@ -15,7 +15,7 @@ from bson import ObjectId
 # =================================================================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODELS = ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"]
+MODELS = ["gemini-2.5-flash"]
 
 client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client_db.game_db
