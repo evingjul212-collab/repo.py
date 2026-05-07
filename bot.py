@@ -1,6 +1,4 @@
 import os
-import io
-import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -11,112 +9,123 @@ from google import genai
 # =================================================================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_NAME = "gemini-2.5-flash" 
+MODELS = ["gemini-2.5-flash"] # Menggunakan versi terbaru yang stabil
 
 client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client_db.game_db
 users = db.user_states
 
 # =================================================================
-# [2] ENGINE: PROMPT BUILDER (Ketat 1000 Karakter)
-# =================================================================
-def build_master_prompt(story_data, user_input, state):
-    chars = story_data.get("characters", [])
-    char_info = "".join([f"- {c['name']}: {c.get('sifat')}\n" for c in chars])
-    
-    # Instruksi ini memaksa AI untuk tetap ringkas dan fokus pada dialog
-    prompt = (
-        f"Instruksi: Penulis novel profesional. Gunakan Bahasa Indonesia.\n"
-        f"ATURAN: TEPAT 3 PARAGRAF. Total panjang teks sekitar 1000 karakter.\n"
-        f"Gaya: Dominasi dialog antar karakter, narasi minimal.\n"
-        f"Konteks Karakter:\n{char_info}\n"
-        f"Ringkasan Terakhir: {story_data.get('summary', '')[:500]}\n\n"
-    )
-    
-    if state == "WAIT_TS":
-        prompt += f"LOGIKA TIME SKIP: {user_input}. Tulis adegan pembuka setelah waktu tersebut berlalu."
-    else:
-        prompt += f"Input User: {user_input}\nLanjutkan cerita."
-        
-    return prompt
-
-# =================================================================
-# [3] HANDLERS
+# [2] HANDLER: START & GENRE
 # =================================================================
 async def start(update: Update, context):
     user_id = update.effective_user.id
-    await users.update_one({"_id": user_id}, {"$set": {"state": "NORMAL"}}, upsert=True)
+    # Reset state di DB
+    await users.update_one(
+        {"_id": user_id},
+        {"$set": {"state": "CHOOSING_GENRE"}},
+        upsert=True
+    )
     
     keyboard = [
-        [InlineKeyboardButton("Time Skip ⏳", callback_data="go_timeskip")],
-        [InlineKeyboardButton("Export (.json) 📥", callback_data="go_export")]
+        [InlineKeyboardButton("Roman Komedi 😂", callback_data="genre_romcom")],
+        [InlineKeyboardButton("Roman Petualangan 🗺️", callback_data="genre_adventure")],
+        [InlineKeyboardButton("Dewasa (21+) 🔥", callback_data="genre_mature")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
-        "Bot Aktif. Kirim file .json untuk Import atau ketik pesan untuk lanjut:", 
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "Selamat datang di AI Story Generator! ✍️\nPilih tema ceritamu:",
+        reply_markup=reply_markup
     )
 
-async def handle_callback(update: Update, context):
+async def select_genre(update: Update, context):
     query = update.callback_query
     user_id = query.from_user.id
+    genre = query.data.split("_")[1]
     
-    if query.data == "go_timeskip":
-        await users.update_one({"_id": user_id}, {"$set": {"state": "WAIT_TS"}})
-        await query.edit_message_text("Ketik durasi waktu (misal: 'Besok pagi' atau '1 jam kemudian'):")
+    # Instruksi sistem berdasarkan genre
+    prompts = {
+        "romcom": "Gaya bahasa romantis-komedi, ringan, dan penuh candaan.",
+        "adventure": "Gaya bahasa naratif petualangan dengan unsur romansa yang kuat.",
+        "mature": "Gaya bahasa intens, emosional, dan eksplisit (21+). Fokus pada ketegangan hubungan."
+    }
 
-    elif query.data == "go_export":
-        data = await users.find_one({"_id": user_id})
-        story = data.get("current_story", {})
-        file = io.BytesIO(json.dumps(story, indent=4).encode())
-        file.name = f"cerita_{user_id}.json"
-        await query.message.reply_document(document=file, caption="File cadangan ceritamu.")
-
-    elif query.data == "confirm_import":
-        new_data = context.user_data.get('temp_import')
-        await users.update_one({"_id": user_id}, {"$set": {"current_story": new_data, "state": "NORMAL"}})
-        await query.edit_message_text("Import Berhasil! ✅ Silakan lanjut ceritanya.")
-
-async def message_handler(update: Update, context):
-    user_id = update.effective_user.id
+    await users.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "current_story": {
+                "genre": genre,
+                "sys_prompt": prompts[genre],
+                "summary": "Cerita baru saja dimulai.",
+                "turn_count": 0
+            },
+            "state": "STORY_ONGOING"
+        }}
+    )
     
-    # FITUR IMPORT
-    if update.message.document:
-        doc = update.message.document
-        if doc.file_name.endswith(".json"):
-            file = await doc.get_file()
-            content = await file.download_as_bytearray()
-            context.user_data['temp_import'] = json.loads(content.decode("utf-8"))
-            kb = [[InlineKeyboardButton("Ya, Timpa Cerita ✅", callback_data="confirm_import")]]
-            await update.message.reply_text("File terdeteksi. Timpa database?", reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    # GENERASI CERITA
-    msg = update.message.text
-    data = await users.find_one({"_id": user_id})
-    if not data: return
-    
-    story = data.get("current_story", {})
-    prompt = build_master_prompt(story, msg, data.get("state"))
-    
-    response = client_ai.models.generate_content(model=MODEL_NAME, contents=prompt)
-    ai_text = response.text[:3500] # Pengaman agar tidak melebihi limit Telegram
-
-    # Update Summary di DB (Dibatasi 1000 karakter agar tidak 'bengkak')
-    new_summary = f"{story.get('summary', '')} | {msg} -> {ai_text}"[-1000:]
-    await users.update_one({"_id": user_id}, {
-        "$set": {"current_story.summary": new_summary, "state": "NORMAL"}
-    })
-    
-    await update.message.reply_text(ai_text)
+    await query.answer()
+    await query.edit_message_text(f"Genre {genre.upper()} terpilih! Silakan ketik premis awal ceritamu...")
 
 # =================================================================
-# [4] RUN
+# [3] ENGINE: STORY GENERATOR & AUTO-SUMMARY
+# =================================================================
+async def chat_engine(update: Update, context):
+    user_id = update.effective_user.id
+    user_msg = update.message.text
+    
+    # Ambil data dari MongoDB
+    data = await users.find_one({"_id": user_id})
+    if not data or data.get("state") != "STORY_ONGOING":
+        return
+
+    story = data["current_story"]
+    turn_count = story.get("turn_count", 0) + 1
+
+    # Konstruksi Master Prompt
+    master_prompt = (
+        f"Role: {story['sys_prompt']}\n"
+        f"Konteks Alur Sebelumnya: {story['summary']}\n\n"
+        f"Input User: {user_msg}\n"
+        f"Tugas: Lanjutkan cerita dengan konsisten."
+    )
+
+    # Generate dari Gemini
+    response = client_ai.models.generate_content(model=MODELS[0], contents=master_prompt)
+    ai_text = response.text
+
+    # Update Ringkasan Otomatis (Setiap 5 putaran)
+    current_summary = f"{story['summary']}\nUser: {user_msg}\nAI: {ai_text}"
+    
+    if turn_count % 5 == 0:
+        summary_prompt = f"Ringkas alur cerita berikut menjadi poin-poin penting agar konsisten: {current_summary}"
+        summary_res = client_ai.models.generate_content(model=MODELS[0], contents=summary_prompt)
+        final_summary = summary_res.text
+    else:
+        final_summary = current_summary[-2000:] # Jaga agar tidak overload jika belum waktunya ringkas
+
+    # Simpan kembali ke DB
+    await users.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "current_story.summary": final_summary,
+            "current_story.turn_count": turn_count
+        }}
+    )
+
+    await update.message.reply_text(ai_text, parse_mode='Markdown')
+
+# =================================================================
+# [4] MAIN APP
 # =================================================================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL, message_handler))
+    app.add_handler(CallbackQueryHandler(select_genre, pattern="^genre_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine))
+    
+    print("Bot Berjalan...")
     app.run_polling()
 
 if __name__ == "__main__":
