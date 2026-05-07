@@ -9,7 +9,7 @@ from google import genai
 # =================================================================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODELS = ["gemini-2.0-flash"] # Menggunakan versi terbaru yang stabil
+MODELS = ["gemini-2.5-flash"] # Menggunakan versi terbaru yang stabil
 
 client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client_db.game_db
