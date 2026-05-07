@@ -95,10 +95,13 @@ async def chat_engine(update: Update, context):
 # AUTO RETRY GEMINI
 # =====================================================
 
-MAX_RETRY = 15
+import asyncio
+import random
+
 ai_text = None
 
-for attempt in range(MAX_RETRY):
+for attempt in range(20):
+
     try:
         print(f"Generate attempt {attempt+1}")
 
@@ -107,21 +110,27 @@ for attempt in range(MAX_RETRY):
             contents=master_prompt
         )
 
-        if response and hasattr(response, "text") and response.text:
-            ai_text = response.text
-            print("Generate berhasil")
-            break
+        # jika berhasil dapat text
+        if response and response.text:
+            ai_text = response.text.strip()
+
+            if ai_text:
+                print("Generate berhasil")
+                break
 
     except Exception as e:
-        print(f"Gemini Error: {e}")
+        print("Gemini Error:", e)
 
-    # tunggu sebelum retry
-    await asyncio.sleep(3)
+    # tunggu sebelum ulang
+    wait_time = random.randint(2, 5)
+    print(f"Retry {wait_time} detik")
 
-# kalau tetap gagal
+    await asyncio.sleep(wait_time)
+
+# jika gagal total
 if not ai_text:
     await update.message.reply_text(
-        "AI sedang sibuk, coba lagi sebentar ya..."
+        "AI sedang sibuk, coba lagi sebentar."
     )
     return
 
