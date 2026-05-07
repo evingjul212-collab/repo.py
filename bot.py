@@ -91,8 +91,39 @@ async def chat_engine(update: Update, context):
     )
 
     # Generate dari Gemini
-    response = client_ai.models.generate_content(model=MODELS[0], contents=master_prompt)
-    ai_text = response.text
+    # =====================================================
+# AUTO RETRY GEMINI
+# =====================================================
+
+MAX_RETRY = 15
+ai_text = None
+
+for attempt in range(MAX_RETRY):
+    try:
+        print(f"Generate attempt {attempt+1}")
+
+        response = client_ai.models.generate_content(
+            model=MODELS[0],
+            contents=master_prompt
+        )
+
+        if response and hasattr(response, "text") and response.text:
+            ai_text = response.text
+            print("Generate berhasil")
+            break
+
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+
+    # tunggu sebelum retry
+    await asyncio.sleep(3)
+
+# kalau tetap gagal
+if not ai_text:
+    await update.message.reply_text(
+        "AI sedang sibuk, coba lagi sebentar ya..."
+    )
+    return
 
     # Update Ringkasan Otomatis (Setiap 5 putaran)
     current_summary = f"{story['summary']}\nUser: {user_msg}\nAI: {ai_text}"
