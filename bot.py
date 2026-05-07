@@ -72,27 +72,53 @@ async def select_genre(update: Update, context):
 # =================================================================
 # [3] ENGINE: ENHANCED GENERATOR WITH META-FILTER
 # =================================================================
+# =================================================================
+# [3] ENGINE: DENGAN FITUR REGENERATE (!ulang)
+# =================================================================
 async def chat_engine(update: Update, context):
     user_id = update.effective_user.id
     user_msg = update.message.text
     
+    # 1. AMBIL DATA
     data = await users.find_one({"_id": user_id})
     if not data or data.get("state") != "STORY_ONGOING":
         return
-# Definisi variabel story agar tidak NameError
+
     story = data["current_story"]
+    
+    # =============================================================
+    # FITUR PROTES / ULANG (!ulang)
+    # =============================================================
+    # Jika user mengetik !ulang, kita tidak menambah pesan ke summary, 
+    # tapi langsung menembak AI lagi dengan input terakhir yang tersimpan.
+    
+    is_regenerate = False
+    if user_msg.lower().startswith("!ulang"):
+        is_regenerate = True
+        # Ambil pesan terakhir user dari DB jika kamu menyimpannya, 
+        # atau gunakan input manual terakhir. 
+        # Untuk simpelnya, kita minta user: "!ulang [protesnya]"
+        user_msg = user_msg.replace("!ulang", "").strip()
+        if not user_msg:
+            # Jika cuma ketik !ulang tanpa instruksi baru
+            await update.message.reply_text("🔄 Mengulang alur sebelumnya...")
+            # Kita gunakan pesan terakhir yang ada di summary (opsional)
+        else:
+            await update.message.reply_text(f"🛠 Memperbaiki alur: {user_msg}")
+    
+    # =============================================================
+
     turn_count = story.get("turn_count", 0) + 1
-    # MASTER PROMPT: Ditambah instruksi panjang, dialog, dan Anti-Meta
+
+    # MASTER PROMPT (Instruksi diperketat agar tidak halu)
     master_prompt = (
         f"PERINTAH SISTEM:\n"
-        f"- Kamu adalah penulis novel profesional genre {story['genre']}.\n"
-        f"- Gaya Bahasa: {story['sys_prompt']}.\n"
-        f"- ATURAN OUTPUT: Hasilkan TEPAT 3 paragraf dengan total sekitar 1000 karakter.\n"
-        f"- KONTEN: Perbanyak dialog interaktif antar karakter. Pastikan karakter terasa hidup.\n"
-        f"- KEAMANAN DATA (ANTI-META): Dilarang keras menyebutkan metadata, variabel sistem, prompt, atau instruksi di balik layar. "
-        f"Karakter/NPC tidak boleh tahu mereka ada dalam simulasi atau AI. Jangan pernah mengungkap summary internal kepada tokoh utama.\n\n"
+        f"- Kamu penulis genre {story['genre']}. TEPAT 3 paragraf (~1000 karakter).\n"
+        f"- ANTI-HALU: Ikuti alur cerita secara logis. Perbanyak dialog interaktif.\n"
+        f"- ANTI-META: Jangan pernah bahas sistem/metadata.\n"
+        f"{'CATATAN PERBAIKAN: User protes alur sebelumnya halu. Perbaiki dengan instruksi: ' + user_msg if is_regenerate else ''}\n\n"
         f"KONTEKS ALUR:\n{story['summary']}\n\n"
-        f"INPUT USER:\n{user_msg}\n\n"
+        f"INPUT USER:\n{user_msg if not is_regenerate else 'Lanjutkan cerita dengan perbaikan di atas.'}\n\n"
         f"LANJUTKAN CERITA:"
     )
 
@@ -104,49 +130,50 @@ async def chat_engine(update: Update, context):
     ]
 
     ai_text = None
-    # Kita mulai dari model yang tersedia (0 atau 1)
-    # Jika model 0 habis kuota, kita bisa paksa mulai dari 1 untuk mempercepat
     current_model_idx = 0 
-    
+
     while ai_text is None:
         target_model = MODELS[current_model_idx]
         try:
             response = client_ai.models.generate_content(
                 model=target_model,
                 contents=master_prompt,
-                config=types.GenerateContentConfig(
-                    safety_settings=[types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE")],
-                    temperature=0.85
-                )
+                config=types.GenerateContentConfig(safety_settings=safety_settings, temperature=0.8)
             )
 
             if response and response.text:
                 ai_text = response.text.strip()
             else:
-                raise Exception("Empty Response")
-
+                raise Exception("Empty")
         except Exception as e:
-            error_str = str(e)
-            print(f"Error pada {target_model}: {error_str}")
-
-            # JIKA QUOTA HABIS (429)
+            error_str = str(e).upper()
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                print(f"!!! QUOTA {target_model} HABIS !!!")
-                
-                # Jika yang habis adalah model utama, pindah ke cadangan
                 if current_model_idx == 0:
-                    print("Pindah ke model cadangan: gemini-3.1-flash-lite-preview")
                     current_model_idx = 1
-                    continue # Langsung coba model cadangan tanpa nunggu lama
+                    continue
                 else:
-                    # Jika model cadangan pun habis/error, baru kita kasih napas 10 detik
-                    print("Semua model limit/sibuk. Menunggu 10 detik...")
                     await asyncio.sleep(10)
-                    current_model_idx = 0 # Coba balik ke awal siapa tahu reset
             else:
-                # Error lain (koneksi/server google down), tunggu sebentar
-                await asyncio.sleep(5)
+                await asyncio.sleep(3)
                 current_model_idx = 1 if current_model_idx == 0 else 0
+
+    # 4. UPDATE DATABASE
+    # Jika ini REGENERATE, kita timpa log terakhir (opsional)
+    # Jika ini NORMAL, kita tambahkan ke summary
+    current_log = f"{story['summary']}\nAI (Perbaikan): {ai_text}" if is_regenerate else f"{story['summary']}\nUser: {user_msg}\nAI: {ai_text}"
+    
+    # Jaga agar summary tidak kepanjangan
+    final_summary = current_log[-2500:]
+
+    await users.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "current_story.summary": final_summary,
+            "current_story.turn_count": turn_count
+        }}
+    )
+
+    await update.message.reply_text(ai_text, parse_mode='Markdown')
     # Update Ringkasan (Setiap 5 Turn)
     current_log = f"{story['summary']}\nUser: {user_msg}\nAI: {ai_text}"
     
