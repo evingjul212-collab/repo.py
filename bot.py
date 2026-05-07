@@ -1,4 +1,6 @@
 import os
+import io
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -9,123 +11,125 @@ from google import genai
 # =================================================================
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-MODELS = ["gemini-2.5-flash"] # Menggunakan versi terbaru yang stabil
+MODEL_NAME = "gemini-2.5-flash" 
 
 client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client_db.game_db
 users = db.user_states
 
 # =================================================================
-# [2] HANDLER: START & GENRE
+# [2] ENGINE: PROMPT BUILDER
+# =================================================================
+def build_master_prompt(story_data, user_input, state):
+    chars = story_data.get("characters", [])
+    char_info = ""
+    for c in chars:
+        char_info += f"- {c['name']} (Fisik: {c.get('fisik')}, Sifat: {c.get('sifat')}, Hubungan: {c.get('hubungan')})\n"
+    
+    prompt = (
+        f"Instruksi: Penulis novel {story_data.get('genre', 'dewasa')} profesional.\n"
+        f"Format: WAJIB 3 PARAGRAF. Gunakan SEDIKIT narasi dan BANYAK dialog intens.\n"
+        f"Karakter:\n{char_info}\n"
+        f"Ringkasan Sebelumnya: {story_data.get('summary', 'Baru dimulai')}\n\n"
+    )
+    
+    if state == "WAIT_TS":
+        prompt += f"LOGIKA TIME SKIP: {user_input}. Tulis adegan setelah waktu berlalu tersebut."
+    else:
+        prompt += f"Input User: {user_input}\nLanjutkan cerita dengan dialog yang kuat."
+        
+    return prompt
+
+# =================================================================
+# [3] HANDLERS
 # =================================================================
 async def start(update: Update, context):
     user_id = update.effective_user.id
-    # Reset state di DB
-    await users.update_one(
-        {"_id": user_id},
-        {"$set": {"state": "CHOOSING_GENRE"}},
-        upsert=True
-    )
+    await users.update_one({"_id": user_id}, {"$set": {"state": "NORMAL"}}, upsert=True)
     
     keyboard = [
-        [InlineKeyboardButton("Roman Komedi 😂", callback_data="genre_romcom")],
-        [InlineKeyboardButton("Roman Petualangan 🗺️", callback_data="genre_adventure")],
-        [InlineKeyboardButton("Dewasa (21+) 🔥", callback_data="genre_mature")]
+        [InlineKeyboardButton("Genre: Romansa Petualangan", callback_data="set_adventure")],
+        [InlineKeyboardButton("Genre: Dewasa (21+)", callback_data="set_mature")],
+        [InlineKeyboardButton("Time Skip ⏳", callback_data="go_timeskip")],
+        [InlineKeyboardButton("Export (.json) 📥", callback_data="go_export")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(
-        "Selamat datang di AI Story Generator! ✍️\nPilih tema ceritamu:",
-        reply_markup=reply_markup
+        "Sistem Siap. Kirim file .json untuk Import, pilih menu, atau ketik untuk mulai:", 
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def select_genre(update: Update, context):
+async def handle_callback(update: Update, context):
     query = update.callback_query
     user_id = query.from_user.id
-    genre = query.data.split("_")[1]
     
-    # Instruksi sistem berdasarkan genre
-    prompts = {
-        "romcom": "Gaya bahasa romantis-komedi, ringan, dan penuh candaan.",
-        "adventure": "Gaya bahasa naratif petualangan dengan unsur romansa yang kuat.",
-        "mature": "Gaya bahasa intens, emosional, dan eksplisit (21+). Fokus pada ketegangan hubungan."
-    }
+    if query.data.startswith("set_"):
+        genre = query.data.split("_")[1]
+        await users.update_one({"_id": user_id}, {"$set": {
+            "current_story": {"genre": genre, "summary": "Awal cerita.", "characters": []},
+            "state": "NORMAL"
+        }})
+        await query.edit_message_text(f"Genre {genre.upper()} aktif. Silakan tulis premis!")
 
-    await users.update_one(
-        {"_id": user_id},
-        {"$set": {
-            "current_story": {
-                "genre": genre,
-                "sys_prompt": prompts[genre],
-                "summary": "Cerita baru saja dimulai.",
-                "turn_count": 0
-            },
-            "state": "STORY_ONGOING"
-        }}
-    )
-    
-    await query.answer()
-    await query.edit_message_text(f"Genre {genre.upper()} terpilih! Silakan ketik premis awal ceritamu...")
+    elif query.data == "go_timeskip":
+        await users.update_one({"_id": user_id}, {"$set": {"state": "WAIT_TS"}})
+        await query.edit_message_text("Mau melompat berapa lama? (Contoh: 'Besok pagi' atau '1 tahun kemudian')")
 
-# =================================================================
-# [3] ENGINE: STORY GENERATOR & AUTO-SUMMARY
-# =================================================================
-async def chat_engine(update: Update, context):
+    elif query.data == "go_export":
+        data = await users.find_one({"_id": user_id})
+        story = data.get("current_story", {})
+        file = io.BytesIO(json.dumps(story, indent=4).encode())
+        file.name = f"cerita_{user_id}.json"
+        await query.message.reply_document(document=file, caption="Cadangan ceritamu.")
+
+    elif query.data == "confirm_import":
+        new_data = context.user_data.get('temp_import')
+        await users.update_one({"_id": user_id}, {"$set": {"current_story": new_data, "state": "NORMAL"}})
+        await query.edit_message_text("Import Berhasil! ✅ Silakan lanjut ceritanya.")
+
+async def message_handler(update: Update, context):
     user_id = update.effective_user.id
-    user_msg = update.message.text
     
-    # Ambil data dari MongoDB
-    data = await users.find_one({"_id": user_id})
-    if not data or data.get("state") != "STORY_ONGOING":
+    # Cek jika ada file (Import)
+    if update.message.document:
+        doc = update.message.document
+        if doc.file_name.endswith(".json"):
+            file = await doc.get_file()
+            content = await file.download_as_bytearray()
+            import_data = json.loads(content.decode("utf-8"))
+            context.user_data['temp_import'] = import_data
+            
+            kb = [[InlineKeyboardButton("Ya, Timpa ✅", callback_data="confirm_import")]]
+            await update.message.reply_text(f"File terdeteksi. Timpa cerita lama?", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    story = data["current_story"]
-    turn_count = story.get("turn_count", 0) + 1
-
-    # Konstruksi Master Prompt
-    master_prompt = (
-        f"Role: {story['sys_prompt']}\n"
-        f"Konteks Alur Sebelumnya: {story['summary']}\n\n"
-        f"Input User: {user_msg}\n"
-        f"Tugas: Lanjutkan cerita dengan konsisten."
-    )
-
-    # Generate dari Gemini
-    response = client_ai.models.generate_content(model=MODELS[0], contents=master_prompt)
+    # Chat Biasa / Time Skip
+    msg = update.message.text
+    data = await users.find_one({"_id": user_id})
+    if not data: return
+    
+    state = data.get("state")
+    story = data.get("current_story", {})
+    
+    prompt = build_master_prompt(story, msg, state)
+    response = client_ai.models.generate_content(model=MODEL_NAME, contents=prompt)
     ai_text = response.text
 
-    # Update Ringkasan Otomatis (Setiap 5 putaran)
-    current_summary = f"{story['summary']}\nUser: {user_msg}\nAI: {ai_text}"
+    # Update Summary (Simpan 1500 karakter terakhir agar konsisten)
+    new_summary = f"{story.get('summary', '')} | {msg} -> {ai_text}"[-1500:]
+    await users.update_one({"_id": user_id}, {
+        "$set": {"current_story.summary": new_summary, "state": "NORMAL"}
+    })
     
-    if turn_count % 5 == 0:
-        summary_prompt = f"Ringkas alur cerita berikut menjadi poin-poin penting agar konsisten: {current_summary}"
-        summary_res = client_ai.models.generate_content(model=MODELS[0], contents=summary_prompt)
-        final_summary = summary_res.text
-    else:
-        final_summary = current_summary[-2000:] # Jaga agar tidak overload jika belum waktunya ringkas
-
-    # Simpan kembali ke DB
-    await users.update_one(
-        {"_id": user_id},
-        {"$set": {
-            "current_story.summary": final_summary,
-            "current_story.turn_count": turn_count
-        }}
-    )
-
-    await update.message.reply_text(ai_text, parse_mode='Markdown')
+    await update.message.reply_text(ai_text)
 
 # =================================================================
-# [4] MAIN APP
+# [4] MAIN
 # =================================================================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(select_genre, pattern="^genre_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine))
-    
-    print("Bot Berjalan...")
+    app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL, message_handler))
     app.run_polling()
 
 if __name__ == "__main__":
