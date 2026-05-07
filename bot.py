@@ -13,8 +13,8 @@ from google.genai import types
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# GUE BALIKIN KE MODEL PILIHAN LU. Nggak gue utak-atik lagi.
-MODELS = ["gemini-2.5-flash"] 
+# Daftar model: Index 0 adalah Utama, Index 1 adalah Cadangan
+MODELS = ["gemini-2.5-flash", "gemini-3.1-flash-lite-preview"] 
 
 client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client_db.game_db
@@ -71,7 +71,7 @@ async def select_genre(update: Update, context):
     await query.edit_message_text(f"Genre {genre.upper()} terpilih! Silakan ketik premis awal ceritamu...")
 
 # =================================================================
-# [3] ENGINE: STORY GENERATOR
+# [3] ENGINE: AUTO-FAILOVER GENERATOR
 # =================================================================
 async def chat_engine(update: Update, context):
     user_id = update.effective_user.id
@@ -91,7 +91,6 @@ async def chat_engine(update: Update, context):
         f"Tugas: Lanjutkan cerita dengan konsisten."
     )
 
-    # Tambahkan Safety Settings supaya model lu nggak gampang nge-blok (terutama buat genre mature)
     safety_settings = [
         types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
         types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
@@ -100,38 +99,47 @@ async def chat_engine(update: Update, context):
     ]
 
     ai_text = None
+    current_model_idx = 0 # Mulai dari 2.5-flash
 
-    # RE-TRY LOOP (Sekarang di dalam fungsi, nggak bakal error indentasi lagi)
-    for attempt in range(5):
+    while ai_text is None:
+        target_model = MODELS[current_model_idx]
         try:
+            print(f"Mencoba model: {target_model} (Attempt for User {user_id})")
             response = client_ai.models.generate_content(
-                model=MODELS[0],
+                model=target_model,
                 contents=master_prompt,
                 config=types.GenerateContentConfig(safety_settings=safety_settings)
             )
 
             if response and response.text:
                 ai_text = response.text.strip()
-                if ai_text:
-                    break
-        except Exception as e:
-            print(f"Generate attempt {attempt+1} gagal: {e}")
-            await asyncio.sleep(random.randint(1, 3))
+                print(f"Berhasil menggunakan: {target_model}")
+            else:
+                raise Exception("Response kosong atau terfilter")
 
-    if not ai_text:
-        await update.message.reply_text("AI sedang sibuk, coba lagi sebentar.")
-        return
+        except Exception as e:
+            print(f"Model {target_model} Error: {e}")
+            # Pindah ke model cadangan jika model utama gagal
+            if current_model_idx == 0:
+                print("Switching ke model cadangan (3.1-flash-lite)...")
+                current_model_idx = 1
+            else:
+                # Jika model cadangan pun gagal, tunggu sebentar lalu coba balik ke utama
+                print("Semua model sibuk, cooling down...")
+                current_model_idx = 0
+                await asyncio.sleep(3)
 
     # Update Ringkasan Otomatis
     current_summary = f"{story['summary']}\nUser: {user_msg}\nAI: {ai_text}"
     
     if turn_count % 5 == 0:
         try:
+            # Summary juga pakai sistem failover sederhana
             summary_res = client_ai.models.generate_content(
-                model=MODELS[0], 
-                contents=f"Ringkas alur cerita berikut menjadi poin-poin penting agar konsisten: {current_summary}"
+                model=MODELS[0], # Coba utama dulu buat summary
+                contents=f"Ringkas alur cerita berikut menjadi poin-poin penting: {current_summary}"
             )
-            final_summary = summary_res.text
+            final_summary = summary_res.text if summary_res.text else current_summary[-1500:]
         except:
             final_summary = current_summary[-1500:]
     else:
@@ -157,7 +165,7 @@ def main():
     app.add_handler(CallbackQueryHandler(select_genre, pattern="^genre_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine))
     
-    print(f"Bot Berjalan dengan model {MODELS[0]}...")
+    print("Engine Aktif dengan Sistem Auto-Failover (2.5 -> 3.1 Lite)")
     app.run_polling()
 
 if __name__ == "__main__":
