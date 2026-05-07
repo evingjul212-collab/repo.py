@@ -18,25 +18,25 @@ db = client_db.game_db
 users = db.user_states
 
 # =================================================================
-# [2] ENGINE: PROMPT BUILDER
+# [2] ENGINE: PROMPT BUILDER (Ketat 1000 Karakter)
 # =================================================================
 def build_master_prompt(story_data, user_input, state):
     chars = story_data.get("characters", [])
-    char_info = ""
-    for c in chars:
-        char_info += f"- {c['name']} (Fisik: {c.get('fisik')}, Sifat: {c.get('sifat')}, Hubungan: {c.get('hubungan')})\n"
+    char_info = "".join([f"- {c['name']}: {c.get('sifat')}\n" for c in chars])
     
+    # Instruksi ini memaksa AI untuk tetap ringkas dan fokus pada dialog
     prompt = (
-        f"Instruksi: Penulis novel {story_data.get('genre', 'dewasa')} profesional.\n"
-        f"Format: WAJIB 3 PARAGRAF. Gunakan SEDIKIT narasi dan BANYAK dialog intens.\n"
-        f"Karakter:\n{char_info}\n"
-        f"Ringkasan Sebelumnya: {story_data.get('summary', 'Baru dimulai')}\n\n"
+        f"Instruksi: Penulis novel profesional. Gunakan Bahasa Indonesia.\n"
+        f"ATURAN: TEPAT 3 PARAGRAF. Total panjang teks sekitar 1000 karakter.\n"
+        f"Gaya: Dominasi dialog antar karakter, narasi minimal.\n"
+        f"Konteks Karakter:\n{char_info}\n"
+        f"Ringkasan Terakhir: {story_data.get('summary', '')[:500]}\n\n"
     )
     
     if state == "WAIT_TS":
-        prompt += f"LOGIKA TIME SKIP: {user_input}. Tulis adegan setelah waktu berlalu tersebut."
+        prompt += f"LOGIKA TIME SKIP: {user_input}. Tulis adegan pembuka setelah waktu tersebut berlalu."
     else:
-        prompt += f"Input User: {user_input}\nLanjutkan cerita dengan dialog yang kuat."
+        prompt += f"Input User: {user_input}\nLanjutkan cerita."
         
     return prompt
 
@@ -48,13 +48,11 @@ async def start(update: Update, context):
     await users.update_one({"_id": user_id}, {"$set": {"state": "NORMAL"}}, upsert=True)
     
     keyboard = [
-        [InlineKeyboardButton("Genre: Romansa Petualangan", callback_data="set_adventure")],
-        [InlineKeyboardButton("Genre: Dewasa (21+)", callback_data="set_mature")],
         [InlineKeyboardButton("Time Skip ⏳", callback_data="go_timeskip")],
         [InlineKeyboardButton("Export (.json) 📥", callback_data="go_export")]
     ]
     await update.message.reply_text(
-        "Sistem Siap. Kirim file .json untuk Import, pilih menu, atau ketik untuk mulai:", 
+        "Bot Aktif. Kirim file .json untuk Import atau ketik pesan untuk lanjut:", 
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -62,24 +60,16 @@ async def handle_callback(update: Update, context):
     query = update.callback_query
     user_id = query.from_user.id
     
-    if query.data.startswith("set_"):
-        genre = query.data.split("_")[1]
-        await users.update_one({"_id": user_id}, {"$set": {
-            "current_story": {"genre": genre, "summary": "Awal cerita.", "characters": []},
-            "state": "NORMAL"
-        }})
-        await query.edit_message_text(f"Genre {genre.upper()} aktif. Silakan tulis premis!")
-
-    elif query.data == "go_timeskip":
+    if query.data == "go_timeskip":
         await users.update_one({"_id": user_id}, {"$set": {"state": "WAIT_TS"}})
-        await query.edit_message_text("Mau melompat berapa lama? (Contoh: 'Besok pagi' atau '1 tahun kemudian')")
+        await query.edit_message_text("Ketik durasi waktu (misal: 'Besok pagi' atau '1 jam kemudian'):")
 
     elif query.data == "go_export":
         data = await users.find_one({"_id": user_id})
         story = data.get("current_story", {})
         file = io.BytesIO(json.dumps(story, indent=4).encode())
         file.name = f"cerita_{user_id}.json"
-        await query.message.reply_document(document=file, caption="Cadangan ceritamu.")
+        await query.message.reply_document(document=file, caption="File cadangan ceritamu.")
 
     elif query.data == "confirm_import":
         new_data = context.user_data.get('temp_import')
@@ -89,33 +79,30 @@ async def handle_callback(update: Update, context):
 async def message_handler(update: Update, context):
     user_id = update.effective_user.id
     
-    # Cek jika ada file (Import)
+    # FITUR IMPORT
     if update.message.document:
         doc = update.message.document
         if doc.file_name.endswith(".json"):
             file = await doc.get_file()
             content = await file.download_as_bytearray()
-            import_data = json.loads(content.decode("utf-8"))
-            context.user_data['temp_import'] = import_data
-            
-            kb = [[InlineKeyboardButton("Ya, Timpa ✅", callback_data="confirm_import")]]
-            await update.message.reply_text(f"File terdeteksi. Timpa cerita lama?", reply_markup=InlineKeyboardMarkup(kb))
+            context.user_data['temp_import'] = json.loads(content.decode("utf-8"))
+            kb = [[InlineKeyboardButton("Ya, Timpa Cerita ✅", callback_data="confirm_import")]]
+            await update.message.reply_text("File terdeteksi. Timpa database?", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # Chat Biasa / Time Skip
+    # GENERASI CERITA
     msg = update.message.text
     data = await users.find_one({"_id": user_id})
     if not data: return
     
-    state = data.get("state")
     story = data.get("current_story", {})
+    prompt = build_master_prompt(story, msg, data.get("state"))
     
-    prompt = build_master_prompt(story, msg, state)
     response = client_ai.models.generate_content(model=MODEL_NAME, contents=prompt)
-    ai_text = response.text
+    ai_text = response.text[:3500] # Pengaman agar tidak melebihi limit Telegram
 
-    # Update Summary (Simpan 1500 karakter terakhir agar konsisten)
-    new_summary = f"{story.get('summary', '')} | {msg} -> {ai_text}"[-1500:]
+    # Update Summary di DB (Dibatasi 1000 karakter agar tidak 'bengkak')
+    new_summary = f"{story.get('summary', '')} | {msg} -> {ai_text}"[-1000:]
     await users.update_one({"_id": user_id}, {
         "$set": {"current_story.summary": new_summary, "state": "NORMAL"}
     })
@@ -123,7 +110,7 @@ async def message_handler(update: Update, context):
     await update.message.reply_text(ai_text)
 
 # =================================================================
-# [4] MAIN
+# [4] RUN
 # =================================================================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
