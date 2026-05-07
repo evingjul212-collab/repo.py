@@ -80,9 +80,6 @@ async def chat_engine(update: Update, context):
     if not data or data.get("state") != "STORY_ONGOING":
         return
 
-    story = data["current_story"]
-    turn_count = story.get("turn_count", 0) + 1
-
     # MASTER PROMPT: Ditambah instruksi panjang, dialog, dan Anti-Meta
     master_prompt = (
         f"PERINTAH SISTEM:\n"
@@ -105,9 +102,10 @@ async def chat_engine(update: Update, context):
     ]
 
     ai_text = None
+    # Kita mulai dari model yang tersedia (0 atau 1)
+    # Jika model 0 habis kuota, kita bisa paksa mulai dari 1 untuk mempercepat
     current_model_idx = 0 
-
-    # Loop sampai berhasil (Auto-Failover)
+    
     while ai_text is None:
         target_model = MODELS[current_model_idx]
         try:
@@ -115,28 +113,38 @@ async def chat_engine(update: Update, context):
                 model=target_model,
                 contents=master_prompt,
                 config=types.GenerateContentConfig(
-                    safety_settings=safety_settings,
-                    temperature=0.85 # Kreatif tapi tetap terkontrol
+                    safety_settings=[types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE")],
+                    temperature=0.85
                 )
             )
 
             if response and response.text:
-                # Filter tambahan: Jika AI 'ngaco' sebut kata teknis, kita bersihkan sederhana
-                forbidden_words = ["summary", "metadata", "sys_prompt", "input user"]
-                cleaned_text = response.text.strip()
-                for word in forbidden_words:
-                    if word in cleaned_text.lower():
-                        cleaned_text = cleaned_text.replace(word, "...")
-                
-                ai_text = cleaned_text
+                ai_text = response.text.strip()
             else:
                 raise Exception("Empty Response")
 
         except Exception as e:
-            print(f"Error {target_model}: {e}")
-            current_model_idx = 1 if current_model_idx == 0 else 0
-            await asyncio.sleep(2)
+            error_str = str(e)
+            print(f"Error pada {target_model}: {error_str}")
 
+            # JIKA QUOTA HABIS (429)
+            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                print(f"!!! QUOTA {target_model} HABIS !!!")
+                
+                # Jika yang habis adalah model utama, pindah ke cadangan
+                if current_model_idx == 0:
+                    print("Pindah ke model cadangan: gemini-3.1-flash-lite-preview")
+                    current_model_idx = 1
+                    continue # Langsung coba model cadangan tanpa nunggu lama
+                else:
+                    # Jika model cadangan pun habis/error, baru kita kasih napas 10 detik
+                    print("Semua model limit/sibuk. Menunggu 10 detik...")
+                    await asyncio.sleep(10)
+                    current_model_idx = 0 # Coba balik ke awal siapa tahu reset
+            else:
+                # Error lain (koneksi/server google down), tunggu sebentar
+                await asyncio.sleep(5)
+                current_model_idx = 1 if current_model_idx == 0 else 0
     # Update Ringkasan (Setiap 5 Turn)
     current_log = f"{story['summary']}\nUser: {user_msg}\nAI: {ai_text}"
     
