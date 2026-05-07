@@ -79,7 +79,9 @@ async def chat_engine(update: Update, context):
     data = await users.find_one({"_id": user_id})
     if not data or data.get("state") != "STORY_ONGOING":
         return
-
+# Definisi variabel story agar tidak NameError
+    story = data["current_story"]
+    turn_count = story.get("turn_count", 0) + 1
     # MASTER PROMPT: Ditambah instruksi panjang, dialog, dan Anti-Meta
     master_prompt = (
         f"PERINTAH SISTEM:\n"
