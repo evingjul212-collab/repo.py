@@ -78,7 +78,7 @@ async def chat_engine(update: Update, context):
     prompt = build_prompt(story, msg)
     await save_last_prompt(user_id, prompt)
 
-    try:
+try:
 
     ai_text, model = await generate(prompt)
 
