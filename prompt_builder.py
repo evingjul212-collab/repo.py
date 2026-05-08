@@ -9,6 +9,7 @@ ATURAN:
 - Hormati jarak fisik scene
 - Jangan bikin dialog tanpa akses ruang
 - Kalau jauh → hanya teriakan / gesture
+= 80 % berisi dialog dari narasinya
 
 GENRE:
 {story['genre']}
