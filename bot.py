@@ -161,14 +161,24 @@ async def replay(update: Update, context):
         )
 
         await query.message.reply_text(text[:3500])
-        
+#==================================
+async def error_handler(update, context):
+    print("ERROR:", context.error)       
 
 # =========================
 # MAIN
 # =========================
 def main():
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+    Application.builder()
+    .token(BOT_TOKEN)
+    .connect_timeout(30)
+    .read_timeout(30)
+    .write_timeout(30)
+    .pool_timeout(30)
+    .build()
+)
 
     app.add_handler(CommandHandler("start", start))
 
@@ -193,8 +203,11 @@ def main():
     )
 
     print("BOT RUNNING")
-
-    app.run_polling(drop_pending_updates=True)
-
+    app.add_error_handler(error_handler)
+    app.run_polling(
+        poll_interval=1,
+        timeout=30,
+        drop_pending_updates=True
+        )
 if __name__ == "__main__":
     main()
