@@ -43,7 +43,14 @@ async def update_story(user_id, story, ai_text, user_msg):
         {"_id": user_id},
         {"$set": {"story": story}}
     )
+async def get_full_story(user_id):
 
+    data = await users.find_one({"_id": user_id})
+
+    if not data:
+        return []
+
+    return data.get("story", {}).get("archive", [])
 
 async def set_last_scene(user_id, prompt, ai_text, story):
     await users.update_one(
