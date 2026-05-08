@@ -2,6 +2,7 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from memory import get_full_story
 from memory import save_last_prompt, get_last_prompt
+from config import AVAILABLE_MODELS
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -15,7 +16,54 @@ from ai_engine import generate
 from prompt_builder import build_prompt
 from config import BOT_TOKEN
 
+# =========================
+# MODEL MENU
+# =========================
+async def model_menu(update: Update, context):
 
+    keyboard = []
+
+    for label, model_name in AVAILABLE_MODELS.items():
+
+        keyboard.append([
+            InlineKeyboardButton(
+                label,
+                callback_data=f"model_{model_name}"
+            )
+        ])
+
+    await update.message.reply_text(
+        "Pilih model AI:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# =========================
+# SELECT MODEL
+# =========================
+async def select_model(update: Update, context):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    model_name = query.data.replace(
+        "model_",
+        ""
+    )
+
+    await memory.users.update_one(
+        {"_id": query.from_user.id},
+        {
+            "$set": {
+                "selected_model": model_name
+            }
+        }
+    )
+
+    await query.edit_message_text(
+        f"✅ Model aktif:\n\n{model_name}"
+    )
 # =========================
 # START
 # =========================
@@ -83,7 +131,15 @@ async def chat_engine(update: Update, context):
 
     try:
 
-        ai_text, model = await generate(prompt)
+        selected_model = data.get(
+        "selected_model",
+        "gemini-2.5-flash"
+        )
+
+ai_text, model = await generate(
+    prompt,
+    selected_model
+)
 
         # fallback / AI gagal
         if model == "fallback":
@@ -331,5 +387,20 @@ def main():
         timeout=30,
         drop_pending_updates=True
         )
+# COMMAND /model
+    app.add_handler(
+    CommandHandler(
+        "model",
+        model_menu
+    )
+)
+
+# CALLBACK PILIH MODEL
+    app.add_handler(
+    CallbackQueryHandler(
+        select_model,
+        pattern="^model_"
+    )
+)
 if __name__ == "__main__":
     main()
