@@ -204,7 +204,7 @@ async def chat_engine(update: Update, context):
     turn_count = story.get("turn_count", 0) + 1
 
     # prompt utama
-   master_prompt = (
+    master_prompt = (
     "Kamu adalah penulis cerita fiksi interaktif.\n"
     "ATURAN WAJIB:\n"
     "- Jangan pernah keluar dari sudut pandang karakter\n"
