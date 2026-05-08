@@ -1,10 +1,10 @@
 def build_prompt(story, user_msg):
 
     return f"""
-KAMU ADALAH STORY ENGINE.
+KAMU ADALAH STORY ENGINE cerita dewasa 21+.
 
 ATURAN:
-- Jangan meta
+- Jangan meta data membaca npc sebelumnya
 - Jangan tahu masa depan
 - Hormati jarak fisik scene
 - Jangan bikin dialog tanpa akses ruang
