@@ -1,4 +1,3 @@
-import os
 import asyncio
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -10,306 +9,111 @@ from telegram.ext import (
     filters
 )
 
-from motor.motor_asyncio import AsyncIOMotorClient
-from google import genai 
+from config import BOT_TOKEN
+import memory
+from ai_engine import generate
+from prompt_builder import build_prompt
 
 
-# =================================================================
-# [1] CONFIG & DATABASE
-# =================================================================
-
-BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
-client_ai = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
-)
-
-# MODEL PRIORITAS
-MODELS = [
-
-    "gemma-4-31b-it",
-    "gemini-2.5-flash",
-    "gemini-3.1-flash"
-]
-
-# MONGODB
-client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
-
-db = client_db.game_db
-users = db.user_states
-
-
-# =================================================================
-# [2] HANDLER: START
-# =================================================================
+# =========================================================
+# START
+# =========================================================
 
 async def start(update: Update, context):
 
     user_id = update.effective_user.id
 
-    # reset state
-    await users.update_one(
-        {"_id": user_id},
-        {
-            "$set": {
-                "state": "CHOOSING_GENRE"
-            }
-        },
-        upsert=True
-    )
+    await memory.init_user(user_id)
 
     keyboard = [
-        [
-            InlineKeyboardButton(
-                "Roman Komedi 😂",
-                callback_data="genre_romcom"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Roman Petualangan 🗺️",
-                callback_data="genre_adventure"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Dewasa 🔥",
-                callback_data="genre_mature"
-            )
-        ]
+        [InlineKeyboardButton("Roman Komedi 😂", callback_data="genre_romcom")],
+        [InlineKeyboardButton("Petualangan 🗺️", callback_data="genre_adventure")],
+        [InlineKeyboardButton("Dewasa 🔥", callback_data="genre_mature")]
     ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
-        "Selamat datang di AI Story Generator ✍️\n\nPilih tema cerita:",
-        reply_markup=reply_markup
+        "🎬 AI Story Engine v2\nPilih genre:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-# =================================================================
-# [3] PILIH GENRE
-# =================================================================
+# =========================================================
+# GENRE SELECT
+# =========================================================
 
 async def select_genre(update: Update, context):
 
     query = update.callback_query
-
     await query.answer()
 
     user_id = query.from_user.id
-
     genre = query.data.split("_")[1]
 
     prompts = {
-        "romcom": (
-            "Gaya bahasa romantis komedi ringan, natural, lucu."
-        ),
-
-        "adventure": (
-            "Gaya bahasa petualangan dramatis dengan unsur romansa."
-        ),
-
-        "mature": (
-            "Gaya bahasa emosional dan dramatis untuk cerita dewasa."
-        )
+        "romcom": "Romantis komedi ringan natural.",
+        "adventure": "Petualangan dramatis realistis.",
+        "mature": "Cerita emosional serius."
     }
 
-    await users.update_one(
-        {"_id": user_id},
-        {
-            "$set": {
-
-                "state": "STORY_ONGOING",
-
-                "current_story": {
-                    "genre": genre,
-                    "sys_prompt": prompts[genre],
-                    "summary": "Cerita baru dimulai.",
-                    "turn_count": 0
-                }
-            }
-        }
-    )
+    await memory.set_genre(user_id, genre, prompts[genre])
 
     await query.edit_message_text(
-        f"Genre {genre.upper()} dipilih.\n\nKetik premis awal cerita."
+        f"Genre {genre.upper()} aktif.\nKirim premis cerita."
     )
 
 
-# =================================================================
-# [4] GENERATE AI DENGAN RETRY
-# =================================================================
-
-async def generate_story(master_prompt):
-
-    ai_text = None
-    used_model = None
-
-    while not ai_text:
-
-        for model_name in MODELS:
-
-            try:
-
-                print(f"Generate pakai: {model_name}")
-
-                response = client_ai.models.generate_content(
-                    model=model_name,
-                    contents=master_prompt
-                )
-
-                if response and response.text:
-
-                    ai_text = response.text.strip()
-
-                    if ai_text:
-
-                        used_model = model_name
-
-                        print(f"Berhasil dengan {model_name}")
-
-                        return ai_text, used_model
-
-            except Exception as e:
-
-                print(f"Error {model_name}: {e}")
-
-        # semua model gagal
-        print("Semua model gagal. Retry 5 detik...")
-        await asyncio.sleep(5)
-
-
-# =================================================================
-# [5] CHAT ENGINE
-# =================================================================
+# =========================================================
+# CHAT ENGINE (CORE LOOP)
+# =========================================================
 
 async def chat_engine(update: Update, context):
 
     user_id = update.effective_user.id
-
     user_msg = update.message.text
 
-    # ambil data user
-    data = await users.find_one({"_id": user_id})
+    data = await memory.get_story(user_id)
 
     if not data:
+        await update.message.reply_text("Ketik /start dulu.")
         return
 
     if data.get("state") != "STORY_ONGOING":
+        await update.message.reply_text("Pilih genre dulu (/start).")
         return
 
-    story = data["current_story"]
+    story = data["story"]
 
-    turn_count = story.get("turn_count", 0) + 1
+    # build prompt structured
+    prompt = build_prompt(story, user_msg)
 
-    # prompt utama
-    master_prompt = (
-    "Kamu adalah penulis cerita fiksi interaktif.\n"
-    "ATURAN WAJIB:\n"
-    "- Jangan pernah keluar dari sudut pandang karakter\n"
-    "- Tidak boleh mengetahui masa depan\n"
-    "- Tidak boleh membaca pikiran NPC\n"
-    "- Tidak boleh meta / menyebut 'AI' atau 'model'\n"
-    "- Tidak boleh tahu informasi yang belum muncul di cerita\n"
-    "- Semua informasi harus berdasarkan adegan saat ini\n"
-    "- Tidak boleh bersifat paranormal omniscient\n\n"
-    
-    f"Genre:\n{story['sys_prompt']}\n\n"
-    f"Ringkasan:\n{story['summary']}\n\n"
-    f"User:\n{user_msg}\n\n"
-    "Lanjutkan cerita secara natural lebih banyak dialog sebanyak 80 % dari narasi."
-    )
+    # AI generate
+    ai_text, model = await generate(prompt)
 
-    # generate AI
-    ai_text, used_model = await generate_story(master_prompt)
+    # update memory
+    await memory.update_story(user_id, story, ai_text, user_msg)
 
-    # update summary
-    current_summary = (
-        f"{story['summary']}\n"
-        f"User: {user_msg}\n"
-        f"AI: {ai_text}"
-    )
+    # send response
+    final = f"{ai_text}\n\n🤖 {model}"
 
-    # ringkas tiap 5 turn
-    if turn_count % 5 == 0:
-
-        try:
-
-            summary_prompt = (
-                "Ringkas cerita berikut menjadi poin penting "
-                "agar karakter dan alur tetap konsisten:\n\n"
-                f"{current_summary}"
-            )
-
-            final_summary, _ = await generate_story(summary_prompt)
-
-        except Exception:
-
-            final_summary = current_summary[-1000:]
-
-    else:
-
-        final_summary = current_summary[-1000:]
-
-    # simpan DB
-    await users.update_one(
-        {"_id": user_id},
-        {
-            "$set": {
-                "current_story.summary": final_summary,
-                "current_story.turn_count": turn_count
-            }
-        }
-    )
-
-    # kirim hasil + nama model
-    await update.message.reply_text(
-    f"{ai_text}\n\n"
-    f"━━━━━━━━━━\n"
-    f"🤖 Model: {used_model}"
-)
+    await update.message.reply_text(final)
 
 
-# =================================================================
-# [6] MAIN
-# =================================================================
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
 
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .concurrent_updates(True)
-        .build()
-    )
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(
-        CommandHandler("start", start)
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(select_genre))
+    app.add_handler(MessageHandler(filters.TEXT, chat_engine))
 
-    app.add_handler(
-        CallbackQueryHandler(
-            select_genre,
-            pattern="^genre_"
-        )
-    )
+    print("AI STORY ENGINE v2 RUNNING")
 
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            chat_engine
-        )
-    )
+    app.run_polling(drop_pending_updates=True)
 
-    print("Bot berjalan...")
-
-    app.run_polling()
-
-
-# =================================================================
-# RUN
-# =================================================================
 
 if __name__ == "__main__":
     main()
