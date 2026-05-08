@@ -75,14 +75,67 @@ async def chat_engine(update: Update, context):
 
     story = data["story"]
 
+    # build prompt
     prompt = build_prompt(story, msg)
+
+    # save last prompt
     await save_last_prompt(user_id, prompt)
 
-try:
+    try:
 
-ai_text, model = await generate(prompt)
+        ai_text, model = await generate(prompt)
 
-    if model == "fallback":
+        # fallback / AI gagal
+        if model == "fallback":
+
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        "🔁 Retry Last Prompt",
+                        callback_data="retry_last"
+                    )
+                ]
+            ]
+
+            await update.message.reply_text(
+                ai_text,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+            return
+
+        # save archive story
+        await memory.update_story(
+            user_id,
+            story,
+            ai_text,
+            msg,
+            prompt
+        )
+
+        # save regenerate memory
+        await memory.set_last_scene(
+            user_id,
+            prompt,
+            ai_text,
+            story
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")],
+            [InlineKeyboardButton("📖 Replay Story", callback_data="replay")]
+        ]
+
+        safe_text = ai_text[:3500]
+
+        await update.message.reply_text(
+            safe_text + f"\n\n🤖 {model}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    except Exception as e:
+
+        print("CHAT ENGINE ERROR:", e)
 
         keyboard = [
             [
@@ -94,46 +147,9 @@ ai_text, model = await generate(prompt)
         ]
 
         await update.message.reply_text(
-            ai_text,
+            "Terjadi error saat proses AI.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-
-        return
-
-    await memory.update_story(
-        user_id,
-        story,
-        ai_text,
-        msg,
-        prompt
-    )
-
-    await memory.set_last_scene(
-        user_id,
-        prompt,
-        ai_text,
-        story
-    )
-
-except Exception as e:
-
-    print("CHAT ENGINE ERROR:", e)
-
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "🔁 Retry Last Prompt",
-                callback_data="retry_last"
-            )
-        ]
-    ]
-
-    await update.message.reply_text(
-        "Terjadi error saat proses AI.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-    return
 # =========================
 # REGENERATE
 # =========================
