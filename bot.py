@@ -189,24 +189,26 @@ REVISI:
     if model == "fallback":
 
         keyboard = [
-        [
-            InlineKeyboardButton(
-                "🔁 Retry Last Prompt",
-                callback_data="retry_last"
-            )
+            [
+                InlineKeyboardButton(
+                    "🔁 Retry Last Prompt",
+                    callback_data="retry_last"
+                )
+            ]
         ]
-    ]
 
         await update.message.reply_text(
-        ai_text,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+            ai_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-    return
+        return
 
     context.user_data.pop("regen")
 
-    await update.message.reply_text(ai_text + f"\n\n🤖 {model}")
+    await update.message.reply_text(
+        ai_text + f"\n\n🤖 {model}"
+    )
 #====================================================
 async def replay(update: Update, context):
 
