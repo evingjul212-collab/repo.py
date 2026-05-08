@@ -34,7 +34,7 @@ async def get_user(user_id):
     return await users.find_one({"_id": user_id})
 
 
-async def update_story(user_id, story, ai_text, user_msg):
+async def update_story(user_id, story, ai_text, user_msg, prompt=None):
     story["turn"] += 1
 
     story["summary"] = (story["summary"] + "\nUser: " + user_msg + "\nAI: " + ai_text)[-2000:]
