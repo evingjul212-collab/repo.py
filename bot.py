@@ -13,7 +13,7 @@ from google.genai import types
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-MODELS = ["gemini-2.5-flash", "gemini-3.1-flash-lite-preview"] 
+MODELS = ["Gemma-4-31b-it", "gemini-3.1-flash-lite-preview"] 
 
 client_db = AsyncIOMotorClient(os.getenv("MONGO_URL"))
 db = client_db.game_db
