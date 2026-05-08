@@ -1,3 +1,12 @@
+import asyncio
+from google import genai
+
+from config import GEMINI_API_KEY, MODELS
+
+client = genai.Client(
+    api_key=GEMINI_API_KEY
+)
+
 async def generate(prompt):
 
     prompt = prompt[:12000]
@@ -5,6 +14,7 @@ async def generate(prompt):
     for model in MODELS:
 
         try:
+
             print(f"TRY MODEL: {model}")
 
             response = await asyncio.wait_for(
@@ -20,10 +30,12 @@ async def generate(prompt):
                 return response.text.strip(), model
 
         except asyncio.TimeoutError:
+
             print(f"{model} TIMEOUT")
             continue
 
         except Exception as e:
+
             print(f"{model} ERROR:", e)
             continue
 
