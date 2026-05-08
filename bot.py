@@ -1,5 +1,4 @@
 import asyncio
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -9,118 +8,123 @@ from telegram.ext import (
     filters
 )
 
-from config import BOT_TOKEN
 import memory
 from ai_engine import generate
 from prompt_builder import build_prompt
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from config import BOT_TOKEN
 
 
-# =========================================================
+# =========================
 # START
-# =========================================================
-
+# =========================
 async def start(update: Update, context):
 
-    user_id = update.effective_user.id
-
-    await memory.init_user(user_id)
+    await memory.init_user(update.effective_user.id)
 
     keyboard = [
-        [InlineKeyboardButton("Roman Komedi 😂", callback_data="genre_romcom")],
-        [InlineKeyboardButton("Petualangan 🗺️", callback_data="genre_adventure")],
-        [InlineKeyboardButton("Dewasa 🔥", callback_data="genre_mature")]
+        [InlineKeyboardButton("Romcom", callback_data="romcom")],
+        [InlineKeyboardButton("Adventure", callback_data="adventure")]
     ]
 
     await update.message.reply_text(
-        "🎬 AI Story Engine v2\nPilih genre:",
+        "Pilih genre",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-# =========================================================
-# GENRE SELECT
-# =========================================================
-
-async def select_genre(update: Update, context):
-
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.from_user.id
-    genre = query.data.split("_")[1]
-
-    prompts = {
-        "romcom": "Romantis komedi ringan natural.",
-        "adventure": "Petualangan dramatis realistis.",
-        "mature": "Cerita emosional serius."
-    }
-
-    await memory.set_genre(user_id, genre, prompts[genre])
-
-    await query.edit_message_text(
-        f"Genre {genre.upper()} aktif.\nKirim premis cerita."
-    )
-
-
-# =========================================================
-# CHAT ENGINE (CORE LOOP)
-# =========================================================
-
+# =========================
+# CHAT ENGINE
+# =========================
 async def chat_engine(update: Update, context):
 
     user_id = update.effective_user.id
     user_msg = update.message.text
 
-    data = await memory.get_story(user_id)
+    data = await memory.get_user(user_id)
 
     if not data:
-        await update.message.reply_text("Ketik /start dulu.")
         return
 
-    if data.get("state") != "STORY_ONGOING":
-        await update.message.reply_text("Pilih genre dulu (/start).")
-        return
+    story = data.get("story")
 
-    story = data["story"]
-
-    # build prompt structured
     prompt = build_prompt(story, user_msg)
 
-    # AI generate
     ai_text, model = await generate(prompt)
 
-    # update memory
     await memory.update_story(user_id, story, ai_text, user_msg)
 
-    # send response
-    final = f"{ai_text}\n\n🤖 {model}"
+    # 🔥 SIMPAN UNTUK REGENERATE
+    await memory.set_last_scene(user_id, prompt, ai_text, story)
 
-    await update.message.reply_text(final)
     keyboard = [
-    [InlineKeyboardButton("🔁 Regenerate Scene", callback_data="regen_scene")]
-]
+        [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")]
+    ]
 
-await update.message.reply_text(
-    final,
-    reply_markup=InlineKeyboardMarkup(keyboard)
-)
+    await update.message.reply_text(
+        ai_text + f"\n\n🤖 {model}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-# =========================================================
+
+# =========================
+# REGENERATE HANDLER
+# =========================
+async def regenerate(update: Update, context):
+
+    query = update.callback_query
+    await query.answer()
+
+    last = await memory.get_last_scene(query.from_user.id)
+
+    context.user_data["regen"] = last
+
+    await query.message.reply_text(
+        "Kirim revisi cerita (contoh: buat Nina lebih dingin, ubah adegan)"
+    )
+
+
+# =========================
+# REWRITE MODE
+# =========================
+async def chat_engine_rewrite(update: Update, context):
+
+    if "regen" not in context.user_data:
+        return
+
+    last = context.user_data["regen"]
+
+    prompt = f"""
+REWRITE SCENE
+
+SCENE LAMA:
+{last['ai_text']}
+
+REVISI USER:
+{update.message.text}
+
+TULIS ULANG DENGAN KONSISTEN.
+"""
+
+    ai_text, model = await generate(prompt)
+
+    context.user_data.pop("regen")
+
+    await update.message.reply_text(ai_text + f"\n\n🤖 {model}")
+
+
+# =========================
 # MAIN
-# =========================================================
-
+# =========================
 def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(select_genre))
-    app.add_handler(MessageHandler(filters.TEXT, chat_engine))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine))
+    app.add_handler(CallbackQueryHandler(regenerate, pattern="regen"))
 
-    print("AI STORY ENGINE v2 RUNNING")
-
-    app.run_polling(drop_pending_updates=True)
+    print("BOT RUNNING")
+    app.run_polling()
 
 
 if __name__ == "__main__":
