@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 from motor.motor_asyncio import AsyncIOMotorClient
-from google import genai
+from google import genai 
 
 
 # =================================================================
