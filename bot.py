@@ -80,7 +80,7 @@ async def chat_engine(update: Update, context):
 
 try:
 
-    ai_text, model = await generate(prompt)
+ai_text, model = await generate(prompt)
 
     if model == "fallback":
 
