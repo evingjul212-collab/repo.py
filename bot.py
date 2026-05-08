@@ -45,8 +45,8 @@ async def select_genre(update: Update, context):
     genre = query.data.split("_")[1]
 
     prompts = {
-        "romcom": "Romantis komedi ringan",
-        "adventure": "Petualangan dramatis"
+        "romcom": "Romantis komedi dewasa 21+",
+        "adventure": "Petualangan dramatis dewasa"
     }
 
     await memory.set_genre(
