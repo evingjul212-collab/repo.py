@@ -1,5 +1,6 @@
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from memory import get_full_story
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -132,7 +133,50 @@ REVISI:
     context.user_data.pop("regen")
 
     await update.message.reply_text(ai_text + f"\n\n🤖 {model}")
+#====================================================
+async def replay(update: Update, context):
 
+    query = update.callback_query
+    await query.answer()
+
+    archive = await get_full_story(query.from_user.id)
+
+    if not archive:
+        await query.message.reply_text("Belum ada story.")
+        return
+
+    text = "📖 FULL STORY REPLAY\n\n"
+
+    for scene in archive:
+        text += (
+            f"━━━━━━━━━━\n"
+            f"Turn: {scene['turn']}\n"
+            f"User: {scene['user']}\n"
+            f"AI: {scene['ai']}\n\n"
+        )
+
+    await query.message.reply_text(text[:3500])async def replay(update: Update, context):
+
+    query = update.callback_query
+    await query.answer()
+
+    archive = await get_full_story(query.from_user.id)
+
+    if not archive:
+        await query.message.reply_text("Belum ada story.")
+        return
+
+    text = "📖 FULL STORY REPLAY\n\n"
+
+    for scene in archive:
+        text += (
+            f"━━━━━━━━━━\n"
+            f"Turn: {scene['turn']}\n"
+            f"User: {scene['user']}\n"
+            f"AI: {scene['ai']}\n\n"
+        )
+
+    await query.message.reply_text(text[:3500])
 
 # =========================
 # MAIN
@@ -154,7 +198,10 @@ def main():
 
     print("BOT RUNNING")
     app.run_polling(drop_pending_updates=True)
-
+    
+    app.add_handler(
+    CallbackQueryHandler(replay, pattern="replay")
+)
 
 if __name__ == "__main__":
     main()
