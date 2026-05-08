@@ -22,13 +22,39 @@ async def start(update: Update, context):
     await memory.init_user(update.effective_user.id)
 
     keyboard = [
-        [InlineKeyboardButton("Romcom", callback_data="romcom")],
-        [InlineKeyboardButton("Adventure", callback_data="adventure")]
+        [InlineKeyboardButton("Roman Komedi", callback_data="genre_romcom")],
+        [InlineKeyboardButton("Petualangan", callback_data="genre_adventure")]
     ]
 
     await update.message.reply_text(
-        "Pilih genre",
+        "Pilih genre:",
         reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# =========================
+# GENRE HANDLER (INI FIX UTAMA)
+# =========================
+async def select_genre(update: Update, context):
+
+    query = update.callback_query
+    await query.answer()
+
+    genre = query.data.split("_")[1]
+
+    prompts = {
+        "romcom": "Romantis komedi ringan",
+        "adventure": "Petualangan dramatis"
+    }
+
+    await memory.set_genre(
+        query.from_user.id,
+        genre,
+        prompts[genre]
+    )
+
+    await query.edit_message_text(
+        f"Genre dipilih: {genre}\nKetik cerita awal."
     )
 
 
@@ -38,22 +64,21 @@ async def start(update: Update, context):
 async def chat_engine(update: Update, context):
 
     user_id = update.effective_user.id
-    user_msg = update.message.text
+    msg = update.message.text
 
     data = await memory.get_user(user_id)
 
-    if not data:
+    if not data or data.get("state") != "STORY":
         return
 
-    story = data.get("story")
+    story = data["story"]
 
-    prompt = build_prompt(story, user_msg)
+    prompt = build_prompt(story, msg)
 
     ai_text, model = await generate(prompt)
 
-    await memory.update_story(user_id, story, ai_text, user_msg)
+    await memory.update_story(user_id, story, ai_text, msg)
 
-    # 🔥 SIMPAN UNTUK REGENERATE
     await memory.set_last_scene(user_id, prompt, ai_text, story)
 
     keyboard = [
@@ -67,7 +92,7 @@ async def chat_engine(update: Update, context):
 
 
 # =========================
-# REGENERATE HANDLER
+# REGENERATE
 # =========================
 async def regenerate(update: Update, context):
 
@@ -79,14 +104,14 @@ async def regenerate(update: Update, context):
     context.user_data["regen"] = last
 
     await query.message.reply_text(
-        "Kirim revisi cerita (contoh: buat Nina lebih dingin, ubah adegan)"
+        "Kirim revisi cerita:"
     )
 
 
 # =========================
 # REWRITE MODE
 # =========================
-async def chat_engine_rewrite(update: Update, context):
+async def rewrite(update: Update, context):
 
     if "regen" not in context.user_data:
         return
@@ -94,15 +119,11 @@ async def chat_engine_rewrite(update: Update, context):
     last = context.user_data["regen"]
 
     prompt = f"""
-REWRITE SCENE
-
-SCENE LAMA:
+REWRITE:
 {last['ai_text']}
 
-REVISI USER:
+REVISI:
 {update.message.text}
-
-TULIS ULANG DENGAN KONSISTEN.
 """
 
     ai_text, model = await generate(prompt)
@@ -120,11 +141,18 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine))
+
+    # 🔥 GENRE WAJIB INI
+    app.add_handler(CallbackQueryHandler(select_genre, pattern="^genre_"))
+
+    # 🔥 REGEN
     app.add_handler(CallbackQueryHandler(regenerate, pattern="regen"))
 
+    # CHAT
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine))
+
     print("BOT RUNNING")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
