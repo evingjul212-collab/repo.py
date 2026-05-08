@@ -144,6 +144,7 @@ async def select_genre(update: Update, context):
 async def generate_story(master_prompt):
 
     ai_text = None
+    used_model = None
 
     while not ai_text:
 
@@ -164,9 +165,11 @@ async def generate_story(master_prompt):
 
                     if ai_text:
 
+                        used_model = model_name
+
                         print(f"Berhasil dengan {model_name}")
 
-                        return ai_text
+                        return ai_text, used_model
 
             except Exception as e:
 
@@ -214,7 +217,7 @@ async def chat_engine(update: Update, context):
     )
 
     # generate AI
-    ai_text = await generate_story(master_prompt)
+    ai_text, used_model = await generate_story(master_prompt)
 
     # update summary
     current_summary = (
@@ -234,7 +237,7 @@ async def chat_engine(update: Update, context):
                 f"{current_summary}"
             )
 
-            final_summary = await generate_story(summary_prompt)
+            final_summary, _ = await generate_story(summary_prompt)
 
         except Exception:
 
@@ -255,8 +258,12 @@ async def chat_engine(update: Update, context):
         }
     )
 
-    # kirim hasil
-    await update.message.reply_text(ai_text)
+    # kirim hasil + nama model
+    await update.message.reply_text(
+    f"{ai_text}\n\n"
+    f"━━━━━━━━━━\n"
+    f"🤖 Model: {used_model}"
+)
 
 
 # =================================================================
