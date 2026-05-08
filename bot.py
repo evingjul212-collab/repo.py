@@ -78,29 +78,62 @@ async def chat_engine(update: Update, context):
     prompt = build_prompt(story, msg)
     await save_last_prompt(user_id, prompt)
 
+    try:
+
     ai_text, model = await generate(prompt)
 
-    await memory.update_story(
-    user_id,
-    story,
-    ai_text,
-    msg,
-    prompt
-)
+    if model == "fallback":
 
-    await memory.set_last_scene(user_id, prompt, ai_text, story)
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🔁 Retry Last Prompt",
+                    callback_data="retry_last"
+                )
+            ]
+        ]
+
+        await update.message.reply_text(
+            ai_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+        return
+
+    await memory.update_story(
+        user_id,
+        story,
+        ai_text,
+        msg,
+        prompt
+    )
+
+    await memory.set_last_scene(
+        user_id,
+        prompt,
+        ai_text,
+        story
+    )
+
+except Exception as e:
+
+    print("CHAT ENGINE ERROR:", e)
 
     keyboard = [
-        [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")],
-        [InlineKeyboardButton("📖 Replay Story", callback_data="replay")]
-        
+        [
+            InlineKeyboardButton(
+                "🔁 Retry Last Prompt",
+                callback_data="retry_last"
+            )
+        ]
     ]
 
     await update.message.reply_text(
-        ai_text + f"\n\n🤖 {model}",
+        "Terjadi error saat proses AI.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+    return
 # =========================
 # REGENERATE
 # =========================
@@ -167,20 +200,40 @@ async def replay(update: Update, context):
     archive = await get_full_story(query.from_user.id)
 
     if not archive:
-        await query.message.reply_text("Belum ada story.")
+
+        await query.message.reply_text(
+            "Belum ada story."
+        )
+
         return
 
     text = "📖 FULL STORY REPLAY\n\n"
 
     for scene in archive:
+
         text += (
-            f"━━━━━━━━━━\n"
-            f"Turn: {scene['turn']}\n"
-            f"User: {scene['user']}\n"
-            f"AI: {scene['ai']}\n\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"TURN: {scene['turn']}\n\n"
+
+            f"USER:\n"
+            f"{scene['user']}\n\n"
+
+            f"AI:\n"
+            f"{scene['ai']}\n\n"
         )
 
-        await query.message.reply_text(text[:3500])
+    filename = f"story_{query.from_user.id}.txt"
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    with open(filename, "rb") as f:
+
+        await query.message.reply_document(
+            document=f,
+            filename=filename,
+            caption="📖 Replay story berhasil dibuat."
+        )
 #==================================
 async def error_handler(update, context):
     print("ERROR:", context.error)       
