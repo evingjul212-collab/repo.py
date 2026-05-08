@@ -66,7 +66,26 @@ async def set_last_scene(user_id, prompt, ai_text, story):
         }
     )
 
+async def save_last_prompt(user_id, prompt):
 
+    await users.update_one(
+        {"_id": user_id},
+        {
+            "$set": {
+                "last_prompt": prompt
+            }
+        }
+    )
+
+
+async def get_last_prompt(user_id):
+
+    data = await users.find_one({"_id": user_id})
+
+    if not data:
+        return None
+
+    return data.get("last_prompt")
 async def get_last_scene(user_id):
     data = await users.find_one({"_id": user_id})
     return data.get("last_scene")
