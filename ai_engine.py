@@ -1,45 +1,75 @@
+# =========================
+# ai_engine.py
+# =========================
+
 import asyncio
+
 from google import genai
 
-from config import GEMINI_API_KEY, MODELS
+from config import (
+    GEMINI_API_KEY,
+    FALLBACK_MODELS
+)
+
+# =========================
+# GEMINI CLIENT
+# =========================
 
 client = genai.Client(
     api_key=GEMINI_API_KEY
 )
 
-async def generate(prompt):
+# =========================
+# GENERATE AI
+# =========================
 
-    prompt = prompt[:12000]
+async def generate(prompt, selected_model):
 
-    for model in MODELS:
+    # =================================
+    # PRIORITAS MODEL USER
+    # =================================
+
+    models_to_try = [
+        selected_model
+    ] + FALLBACK_MODELS
+
+    # hapus duplicate
+    models_to_try = list(dict.fromkeys(models_to_try))
+
+    # =================================
+    # LOOP MODEL
+    # =================================
+
+    for model in models_to_try:
 
         try:
 
             print(f"TRY MODEL: {model}")
 
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.models.generate_content,
-                    model=model,
-                    contents=prompt
-                ),
-                timeout=25
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt
             )
 
             if response and response.text:
-                return response.text.strip(), model
 
-        except asyncio.TimeoutError:
+                text = response.text.strip()
 
-            print(f"{model} TIMEOUT")
-            continue
+                if text:
+
+                    return text, model
 
         except Exception as e:
 
-            print(f"{model} ERROR:", e)
-            continue
+            print(f"MODEL ERROR {model}: {e}")
+
+            await asyncio.sleep(1)
+
+    # =================================
+    # SEMUA GAGAL
+    # =================================
 
     return (
-        "AI sedang sibuk, coba lagi beberapa saat.",
+        "⚠️ Semua model sedang sibuk atau error.",
         "fallback"
     )
