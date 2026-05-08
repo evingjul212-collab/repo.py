@@ -218,7 +218,7 @@ async def chat_engine(update: Update, context):
     f"Genre:\n{story['sys_prompt']}\n\n"
     f"Ringkasan:\n{story['summary']}\n\n"
     f"User:\n{user_msg}\n\n"
-    "Lanjutkan cerita secara natural."
+    "Lanjutkan cerita secara natural lebih banyak dialog sebanyak 80 % dari narasi."
     )
 
     # generate AI
