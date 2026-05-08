@@ -35,13 +35,47 @@ async def get_user(user_id):
 
 
 async def update_story(user_id, story, ai_text, user_msg, prompt=None):
-    story["turn"] += 1
 
-    story["summary"] = (story["summary"] + "\nUser: " + user_msg + "\nAI: " + ai_text)[-2000:]
+    # turn
+    story["turn"] = story.get("turn", 0) + 1
 
+    # =========================
+    # INIT ARCHIVE
+    # =========================
+    if "archive" not in story:
+        story["archive"] = []
+
+    # =========================
+    # SAVE FULL STORY
+    # =========================
+    story["archive"].append({
+        "turn": story["turn"],
+        "user": user_msg,
+        "ai": ai_text,
+        "prompt": prompt
+    })
+
+    # limit archive
+    story["archive"] = story["archive"][-50:]
+
+    # =========================
+    # SUMMARY
+    # =========================
+    story["summary"] = (
+        story.get("summary", "") +
+        f"\nUser: {user_msg}\nAI: {ai_text}"
+    )[-3000:]
+
+    # =========================
+    # SAVE DATABASE
+    # =========================
     await users.update_one(
         {"_id": user_id},
-        {"$set": {"story": story}}
+        {
+            "$set": {
+                "story": story
+            }
+        }
     )
 async def get_full_story(user_id):
 
