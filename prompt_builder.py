@@ -10,6 +10,7 @@ ATURAN WAJIB:
 - NPC hanya tahu kejadian yang sudah terjadi
 - Tidak boleh omniscient / paranormal
 - Harus konsisten dengan world state
+- 80% dalam bentuk dialog interaktif
 
 ========================
 GENRE:
