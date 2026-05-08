@@ -78,7 +78,13 @@ async def chat_engine(update: Update, context):
 
     ai_text, model = await generate(prompt)
 
-    await memory.update_story(user_id, story, ai_text, msg)
+    await memory.update_story(
+    user_id,
+    story,
+    ai_text,
+    msg,
+    prompt
+)
 
     await memory.set_last_scene(user_id, prompt, ai_text, story)
 
@@ -156,28 +162,6 @@ async def replay(update: Update, context):
 
         await query.message.reply_text(text[:3500])
         
-async def replay(update: Update, context):
-
-    query = update.callback_query
-    await query.answer()
-
-    archive = await get_full_story(query.from_user.id)
-
-    if not archive:
-        await query.message.reply_text("Belum ada story.")
-        return
-
-    text = "📖 FULL STORY REPLAY\n\n"
-
-    for scene in archive:
-        text += (
-            f"━━━━━━━━━━\n"
-            f"Turn: {scene['turn']}\n"
-            f"User: {scene['user']}\n"
-            f"AI: {scene['ai']}\n\n"
-        )
-
-    await query.message.reply_text(text[:3500])
 
 # =========================
 # MAIN
@@ -188,22 +172,29 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
 
-    # 🔥 GENRE WAJIB INI
-    app.add_handler(CallbackQueryHandler(select_genre, pattern="^genre_"))
+    # genre
+    app.add_handler(
+        CallbackQueryHandler(select_genre, pattern="^genre_")
+    )
 
-    # 🔥 REGEN
-    app.add_handler(CallbackQueryHandler(regenerate, pattern="regen"))
+    # regenerate
+    app.add_handler(
+        CallbackQueryHandler(regenerate, pattern="regen")
+    )
 
-    # CHAT
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine))
+    # replay
+    app.add_handler(
+        CallbackQueryHandler(replay, pattern="replay")
+    )
+
+    # chat
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine)
+    )
 
     print("BOT RUNNING")
-    app.run_polling(drop_pending_updates=True)
-    
-    app.add_handler(
-    CallbackQueryHandler(replay, pattern="replay")
 
-)
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
