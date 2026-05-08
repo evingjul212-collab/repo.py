@@ -154,7 +154,9 @@ async def replay(update: Update, context):
             f"AI: {scene['ai']}\n\n"
         )
 
-    await query.message.reply_text(text[:3500])async def replay(update: Update, context):
+        await query.message.reply_text(text[:3500])
+        
+async def replay(update: Update, context):
 
     query = update.callback_query
     await query.answer()
