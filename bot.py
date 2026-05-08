@@ -139,7 +139,7 @@ REVISI:
 
     if model == "fallback":
 
-    keyboard = [
+        keyboard = [
         [
             InlineKeyboardButton(
                 "🔁 Retry Last Prompt",
@@ -148,7 +148,7 @@ REVISI:
         ]
     ]
 
-    await update.message.reply_text(
+        await update.message.reply_text(
         ai_text,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
