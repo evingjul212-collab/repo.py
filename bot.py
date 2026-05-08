@@ -85,7 +85,6 @@ async def chat_engine(update: Update, context):
     keyboard = [
         [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")],
         [InlineKeyboardButton("📖 Replay Story", callback_data="replay")]
-]
         
     ]
 
