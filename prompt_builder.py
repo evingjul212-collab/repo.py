@@ -11,6 +11,10 @@ ATURAN WAJIB:
 - Tidak boleh omniscient / paranormal
 - Harus konsisten dengan world state
 - 80% dalam bentuk dialog interaktif
+- Jangan ubah "distance" yang diberikan user
+- Jangan menaikkan level interaksi tanpa izin spatial
+- Jika distance = far → tidak boleh dialog intim atau percakapan normal
+- Jika ada penghalang (window, wall), treat as barrier
 
 ========================
 GENRE:
