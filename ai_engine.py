@@ -21,7 +21,23 @@ async def generate(prompt):
                 if res and res.text:
                     return res.text.strip(), model
 
-            except Exception as e:
-                print("AI ERROR:", e)
+           except Exception as e:
 
-    return "AI gagal", "none"
+    err = str(e)
+
+    print(f"[{model}] ERROR:", err)
+
+    # skip model jika internal error
+    if "500" in err:
+        continue
+
+    if "429" in err:
+        await asyncio.sleep(3)
+        continue
+
+    continue
+
+    return (
+    "Server AI sedang sibuk, coba kirim lagi beberapa saat.",
+    "fallback"
+)
