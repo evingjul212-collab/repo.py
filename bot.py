@@ -1,6 +1,7 @@
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from memory import get_full_story
+from memory import save_last_prompt, get_last_prompt
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -75,6 +76,7 @@ async def chat_engine(update: Update, context):
     story = data["story"]
 
     prompt = build_prompt(story, msg)
+    await save_last_prompt(user_id, prompt)
 
     ai_text, model = await generate(prompt)
 
@@ -135,6 +137,24 @@ REVISI:
 
     ai_text, model = await generate(prompt)
 
+if model == "fallback":
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🔁 Retry Last Prompt",
+                callback_data="retry_last"
+            )
+        ]
+    ]
+
+    await update.message.reply_text(
+        ai_text,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+    return
+
     context.user_data.pop("regen")
 
     await update.message.reply_text(ai_text + f"\n\n🤖 {model}")
@@ -164,7 +184,33 @@ async def replay(update: Update, context):
 #==================================
 async def error_handler(update, context):
     print("ERROR:", context.error)       
+#================
+async def retry_last(update: Update, context):
 
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    prompt = await get_last_prompt(user_id)
+
+    if not prompt:
+
+        await query.message.reply_text(
+            "Tidak ada prompt terakhir."
+        )
+
+        return
+
+    await query.message.reply_text(
+        "🔄 Mengulang proses terakhir..."
+    )
+
+    ai_text, model = await generate(prompt)
+
+    await query.message.reply_text(
+        ai_text + f"\n\n🤖 {model}"
+    )
 # =========================
 # MAIN
 # =========================
@@ -201,7 +247,12 @@ def main():
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, chat_engine)
     )
-
+    app.add_handler(
+    CallbackQueryHandler(
+        retry_last,
+        pattern="retry_last"
+        )
+    )
     print("BOT RUNNING")
     app.add_error_handler(error_handler)
     app.run_polling(
