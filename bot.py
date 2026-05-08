@@ -82,14 +82,16 @@ async def chat_engine(update: Update, context):
     await memory.set_last_scene(user_id, prompt, ai_text, story)
 
     keyboard = [
-        [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")]
+        [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")],
+        [InlineKeyboardButton("📖 Replay Story", callback_data="replay")]
+]
+        
     ]
 
     await update.message.reply_text(
         ai_text + f"\n\n🤖 {model}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
 
 # =========================
 # REGENERATE
@@ -106,7 +108,6 @@ async def regenerate(update: Update, context):
     await query.message.reply_text(
         "Kirim revisi cerita:"
     )
-
 
 # =========================
 # REWRITE MODE
