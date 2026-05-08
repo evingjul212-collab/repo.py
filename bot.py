@@ -13,6 +13,7 @@ from config import BOT_TOKEN
 import memory
 from ai_engine import generate
 from prompt_builder import build_prompt
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 # =========================================================
@@ -96,7 +97,14 @@ async def chat_engine(update: Update, context):
     final = f"{ai_text}\n\n🤖 {model}"
 
     await update.message.reply_text(final)
+    keyboard = [
+    [InlineKeyboardButton("🔁 Regenerate Scene", callback_data="regen_scene")]
+]
 
+await update.message.reply_text(
+    final,
+    reply_markup=InlineKeyboardMarkup(keyboard)
+)
 
 # =========================================================
 # MAIN
