@@ -137,7 +137,7 @@ REVISI:
 
     ai_text, model = await generate(prompt)
 
-if model == "fallback":
+    if model == "fallback":
 
     keyboard = [
         [
