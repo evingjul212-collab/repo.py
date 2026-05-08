@@ -204,16 +204,21 @@ async def chat_engine(update: Update, context):
     turn_count = story.get("turn_count", 0) + 1
 
     # prompt utama
-    master_prompt = (
-        f"{story['sys_prompt']}\n\n"
-        f"Ringkasan cerita:\n"
-        f"{story['summary']}\n\n"
-        f"Input user:\n"
-        f"{user_msg}\n\n"
-        f"Tugas:\n"
-        f"Lanjutkan cerita dengan konsisten.\n"
-        f"Jangan ubah karakter.\n"
-        f"Gunakan bahasa Indonesia natural."
+   master_prompt = (
+    "Kamu adalah penulis cerita fiksi interaktif.\n"
+    "ATURAN WAJIB:\n"
+    "- Jangan pernah keluar dari sudut pandang karakter\n"
+    "- Tidak boleh mengetahui masa depan\n"
+    "- Tidak boleh membaca pikiran NPC\n"
+    "- Tidak boleh meta / menyebut 'AI' atau 'model'\n"
+    "- Tidak boleh tahu informasi yang belum muncul di cerita\n"
+    "- Semua informasi harus berdasarkan adegan saat ini\n"
+    "- Tidak boleh bersifat paranormal omniscient\n\n"
+    
+    f"Genre:\n{story['sys_prompt']}\n\n"
+    f"Ringkasan:\n{story['summary']}\n\n"
+    f"User:\n{user_msg}\n\n"
+    "Lanjutkan cerita secara natural."
     )
 
     # generate AI
