@@ -81,3 +81,25 @@ async def update_story(user_id, story, ai_text, user_msg):
             }
         }
     )
+# =========================================================
+# 🔁 NEW FEATURE: LAST SCENE CACHE
+# =========================================================
+
+async def set_last_scene(user_id, prompt, ai_text, story):
+    await users.update_one(
+        {"_id": user_id},
+        {
+            "$set": {
+                "last_scene": {
+                    "prompt": prompt,
+                    "ai_text": ai_text,
+                    "story": story
+                }
+            }
+        }
+    )
+
+
+async def get_last_scene(user_id):
+    data = await users.find_one({"_id": user_id})
+    return data.get("last_scene", None)
