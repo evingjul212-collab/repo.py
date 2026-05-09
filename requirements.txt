@@ -1,7 +1,4 @@
-# requirements.txt
-python-telegram-bot==21.2          # atau versi paling baru yang Anda inginkan
-httpx==0.27.0                      # optional, untuk logging yang lebih bersih
-python-dotenv==1.0.1               # optional, bila memakai .env
-
-# <-- G4F dari GitHub, dengan prefix git+ dan tanpa authentication -->
-git+https://github.com/xtekky/g4f.git#egg=g4f
+python-telegram-bot==21.2
+g4f     # versi terbaru saat tulisan ini dibuat
+# Jika ada warning tentang "httpx" atau "httpx[socks]" tambahkan:
+httpx==0.27.0
