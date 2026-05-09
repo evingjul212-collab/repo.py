@@ -129,7 +129,7 @@ async def chat_engine(update: Update, context):
     # save last prompt
     await save_last_prompt(user_id, prompt)
 
-    try:
+try:
 
     selected_model = data.get(
         "selected_model",
