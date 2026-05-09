@@ -142,7 +142,7 @@ try:
 )
 
         # fallback / AI gagal
-        if model == "fallback":
+    if model == "fallback":
 
             keyboard = [
                 [
