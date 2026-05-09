@@ -11,8 +11,15 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
+    ContextTypes,
     filters
 )
+
+import memory
+
+from ai_engine import generate
+from prompt_builder import build_prompt
+from config import BOT_TOKEN, AVAILABLE_MODELS
 
 from memory import (
     get_full_story,
@@ -20,21 +27,96 @@ from memory import (
     get_last_prompt
 )
 
-from config import (
-    BOT_TOKEN,
-    AVAILABLE_MODELS
-)
+# =========================================================
+# START
+# =========================================================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-import memory
+    user_id = update.effective_user.id
 
-from ai_engine import generate
-from prompt_builder import build_prompt
+    await memory.init_user(user_id)
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "Roman Komedi",
+                callback_data="genre_romcom"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Petualangan",
+                callback_data="genre_adventure"
+            )
+        ]
+    ]
+
+    await update.message.reply_text(
+        "Pilih genre cerita:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
-# =========================
-# MODEL MENU
-# =========================
-async def model_menu(update: Update, context):
+# =========================================================
+# PILIH GENRE
+# =========================================================
+async def select_genre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    genre = query.data.split("_")[1]
+
+    prompts = {
+
+        "romcom": """
+Romantis komedi dewasa realistis.
+
+JANGAN:
+- teleport lokasi
+- ubah waktu tiba-tiba
+- karakter tahu isi pikiran lawan bicara
+- karakter berbicara mustahil dari jarak jauh
+- meta knowledge NPC
+
+WAJIB:
+- pertahankan lokasi
+- pertahankan waktu
+- transisi realistis
+- dialog natural
+""",
+
+        "adventure": """
+Petualangan dramatis realistis.
+
+JANGAN:
+- teleport lokasi
+- lompat waktu mendadak
+- meta knowledge NPC
+
+WAJIB:
+- transisi adegan jelas
+- lokasi konsisten
+- waktu konsisten
+"""
+    }
+
+    await memory.set_genre(
+        query.from_user.id,
+        genre,
+        prompts[genre]
+    )
+
+    await query.edit_message_text(
+        f"Genre dipilih: {genre}\n\nKirim premis cerita awal."
+    )
+
+
+# =========================================================
+# MENU MODEL
+# =========================================================
+async def model_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = []
 
@@ -53,10 +135,10 @@ async def model_menu(update: Update, context):
     )
 
 
-# =========================
-# SELECT MODEL
-# =========================
-async def select_model(update: Update, context):
+# =========================================================
+# PILIH MODEL
+# =========================================================
+async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
 
@@ -81,77 +163,14 @@ async def select_model(update: Update, context):
     )
 
 
-# =========================
-# START
-# =========================
-async def start(update: Update, context):
-
-    await memory.init_user(
-        update.effective_user.id
-    )
-
-    keyboard = [
-
-        [
-            InlineKeyboardButton(
-                "Roman Komedi",
-                callback_data="genre_romcom"
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "Petualangan",
-                callback_data="genre_adventure"
-            )
-        ]
-    ]
-
-    await update.message.reply_text(
-        "Pilih genre:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-# =========================
-# SELECT GENRE
-# =========================
-async def select_genre(update: Update, context):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    genre = query.data.split("_")[1]
-
-    prompts = {
-
-        "romcom":
-        "Romantis komedi dewasa natural realistis",
-
-        "adventure":
-        "Petualangan dramatis realistis"
-    }
-
-    await memory.set_genre(
-        query.from_user.id,
-        genre,
-        prompts[genre]
-    )
-
-    await query.edit_message_text(
-        f"Genre dipilih: {genre}\n\nKetik cerita awal."
-    )
-
-
-# =========================
+# =========================================================
 # CHAT ENGINE
-# =========================
-async def chat_engine(update: Update, context):
+# =========================================================
+async def chat_engine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
-    msg = update.message.text
+    user_msg = update.message.text
 
     data = await memory.get_user(user_id)
 
@@ -163,16 +182,13 @@ async def chat_engine(update: Update, context):
 
     story = data["story"]
 
-    # =====================
-    # BUILD PROMPT
-    # =====================
-
+    # build prompt
     prompt = build_prompt(
         story,
-        msg
+        user_msg
     )
 
-    # save prompt terakhir
+    # save last prompt
     await save_last_prompt(
         user_id,
         prompt
@@ -180,28 +196,19 @@ async def chat_engine(update: Update, context):
 
     try:
 
-        # =====================
-        # MODEL USER
-        # =====================
-
         selected_model = data.get(
             "selected_model",
             "gemini-2.5-flash"
         )
 
-        # =====================
-        # GENERATE AI
-        # =====================
+        print(f"TRY MODEL: {selected_model}")
 
         ai_text, model = await generate(
             prompt,
             selected_model
         )
 
-        # =====================
-        # FALLBACK
-        # =====================
-
+        # fallback
         if model == "fallback":
 
             keyboard = [
@@ -220,22 +227,15 @@ async def chat_engine(update: Update, context):
 
             return
 
-        # =====================
-        # SAVE STORY
-        # =====================
-
+        # save archive
         await memory.update_story(
             user_id,
             story,
             ai_text,
-            msg,
-            prompt
+            user_msg
         )
 
-        # =====================
-        # SAVE LAST SCENE
-        # =====================
-
+        # save regenerate data
         await memory.set_last_scene(
             user_id,
             prompt,
@@ -243,19 +243,13 @@ async def chat_engine(update: Update, context):
             story
         )
 
-        # =====================
-        # BUTTONS
-        # =====================
-
         keyboard = [
-
             [
                 InlineKeyboardButton(
                     "🔁 Regenerate",
                     callback_data="regen"
                 )
             ],
-
             [
                 InlineKeyboardButton(
                     "📖 Replay Story",
@@ -264,7 +258,6 @@ async def chat_engine(update: Update, context):
             ]
         ]
 
-        # telegram limit
         safe_text = ai_text[:3500]
 
         await update.message.reply_text(
@@ -291,10 +284,10 @@ async def chat_engine(update: Update, context):
         )
 
 
-# =========================
+# =========================================================
 # REGENERATE
-# =========================
-async def regenerate(update: Update, context):
+# =========================================================
+async def regenerate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
 
@@ -311,10 +304,10 @@ async def regenerate(update: Update, context):
     )
 
 
-# =========================
+# =========================================================
 # REWRITE
-# =========================
-async def rewrite(update: Update, context):
+# =========================================================
+async def rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "regen" not in context.user_data:
         return
@@ -322,58 +315,34 @@ async def rewrite(update: Update, context):
     last = context.user_data["regen"]
 
     prompt = f"""
-REWRITE CERITA:
+REWRITE CERITA.
 
+CERITA LAMA:
 {last['ai_text']}
 
-REVISI USER:
-
+PERBAIKAN USER:
 {update.message.text}
+
+ATURAN:
+- jangan ubah lokasi tiba-tiba
+- jangan ubah waktu tiba-tiba
+- pertahankan karakter
+- transisi realistis
 """
 
-    data = await memory.get_user(
-        update.effective_user.id
-    )
-
-    selected_model = data.get(
-        "selected_model",
-        "gemini-2.5-flash"
-    )
-
-    ai_text, model = await generate(
-        prompt,
-        selected_model
-    )
-
-    if model == "fallback":
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "🔁 Retry Last Prompt",
-                    callback_data="retry_last"
-                )
-            ]
-        ]
-
-        await update.message.reply_text(
-            ai_text,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-        return
+    ai_text, model = await generate(prompt)
 
     context.user_data.pop("regen")
 
     await update.message.reply_text(
-        ai_text + f"\n\n🤖 {model}"
+        ai_text[:3500] + f"\n\n🤖 {model}"
     )
 
 
-# =========================
+# =========================================================
 # REPLAY STORY
-# =========================
-async def replay(update: Update, context):
+# =========================================================
+async def replay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
 
@@ -398,18 +367,17 @@ async def replay(update: Update, context):
         text += (
             f"━━━━━━━━━━━━━━━━━━\n"
             f"TURN: {scene['turn']}\n\n"
-            f"USER:\n{scene['user']}\n\n"
-            f"AI:\n{scene['ai']}\n\n"
+
+            f"USER:\n"
+            f"{scene['user']}\n\n"
+
+            f"AI:\n"
+            f"{scene['ai']}\n\n"
         )
 
     filename = f"story_{query.from_user.id}.txt"
 
-    with open(
-        filename,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
+    with open(filename, "w", encoding="utf-8") as f:
         f.write(text)
 
     with open(filename, "rb") as f:
@@ -421,10 +389,10 @@ async def replay(update: Update, context):
         )
 
 
-# =========================
-# RETRY LAST
-# =========================
-async def retry_last(update: Update, context):
+# =========================================================
+# RETRY LAST PROMPT
+# =========================================================
+async def retry_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
 
@@ -463,17 +431,17 @@ async def retry_last(update: Update, context):
     )
 
 
-# =========================
+# =========================================================
 # ERROR HANDLER
-# =========================
+# =========================================================
 async def error_handler(update, context):
 
     print("ERROR:", context.error)
 
 
-# =========================
+# =========================================================
 # MAIN
-# =========================
+# =========================================================
 def main():
 
     app = (
@@ -486,10 +454,7 @@ def main():
         .build()
     )
 
-    # =====================
     # COMMANDS
-    # =====================
-
     app.add_handler(
         CommandHandler("start", start)
     )
@@ -498,35 +463,11 @@ def main():
         CommandHandler("model", model_menu)
     )
 
-    # =====================
     # CALLBACKS
-    # =====================
-
     app.add_handler(
         CallbackQueryHandler(
             select_genre,
             pattern="^genre_"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            regenerate,
-            pattern="regen"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            replay,
-            pattern="replay"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            retry_last,
-            pattern="retry_last"
         )
     )
 
@@ -537,10 +478,28 @@ def main():
         )
     )
 
-    # =====================
-    # CHAT
-    # =====================
+    app.add_handler(
+        CallbackQueryHandler(
+            regenerate,
+            pattern="^regen$"
+        )
+    )
 
+    app.add_handler(
+        CallbackQueryHandler(
+            replay,
+            pattern="^replay$"
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            retry_last,
+            pattern="^retry_last$"
+        )
+    )
+
+    # MESSAGE
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
@@ -555,13 +514,7 @@ def main():
         )
     )
 
-    # =====================
-    # ERROR
-    # =====================
-
-    app.add_error_handler(
-        error_handler
-    )
+    app.add_error_handler(error_handler)
 
     print("BOT RUNNING")
 
@@ -572,8 +525,8 @@ def main():
     )
 
 
-# =========================
+# =========================================================
 # RUN
-# =========================
+# =========================================================
 if __name__ == "__main__":
     main()
