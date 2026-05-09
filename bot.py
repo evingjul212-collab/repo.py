@@ -1,82 +1,100 @@
-import asyncio
+# -*- coding: utf-8 -*-
+"""
+Telegram Bot – Story Generator dengan Google Gemini (atau provider lain).
 
+Fitur utama:
+- Pilih genre (RomCom / Adventure)
+- Pilih model AI via inline‑keyboard (daftar otomatis dari config)
+- Simpan story, prompt terakhir, dan histori di MongoDB
+- Regenerate scene dengan model lain atau revisi manual
+- Replay story (tanpa menulis ke disk)
+- Rate‑limit sederhana, logging, dan error handling
+
+Author: ChatGPT – dimodifikasi oleh Anda
+"""
+
+import logging
+import asyncio
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    BotCommand
+    BotCommand,
 )
-
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
     ContextTypes,
-    filters
+    filters,
 )
 
-import memory
-
-from ai_engine import generate
+# ----------------------------------------------------------------------
+# Local modules (pastikan sudah ada)
+# ----------------------------------------------------------------------
+from memory import (
+    init_user,
+    set_genre,
+    get_user,
+    update_story,
+    set_last_scene,
+    get_last_scene,
+    get_full_story,
+    save_last_prompt,
+    get_last_prompt,
+    users,          # Mongo collection (Motor)
+)
+from ai_engine import generate               # async (prompt, model) -> (text, model_used)
 from prompt_builder import build_prompt
 from config import BOT_TOKEN, AVAILABLE_MODELS
 
-from memory import (
-    get_full_story,
-    save_last_prompt,
-    get_last_prompt
+# ----------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
+log = logging.getLogger(__name__)
 
-# =========================================================
-# START
-# =========================================================
+# ----------------------------------------------------------------------
+# Rate‑limit (max 5 concurrent AI requests)
+# ----------------------------------------------------------------------
+SEMAPHORE = asyncio.Semaphore(5)
+
+async def _generate_limited(prompt: str, model_name: str):
+    async with SEMAPHORE:
+        return await generate(prompt, model_name)
+
+# ----------------------------------------------------------------------
+# 1️⃣ /start – pilih genre
+# ----------------------------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     user_id = update.effective_user.id
-
-    await memory.init_user(user_id)
+    await init_user(user_id)
 
     keyboard = [
-        [
-            InlineKeyboardButton(
-                "Roman Komedi",
-                callback_data="genre_romcom"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Petualangan",
-                callback_data="genre_adventure"
-            )
-        ]
+        [InlineKeyboardButton("Roman Komedi", callback_data="genre_romcom")],
+        [InlineKeyboardButton("Petualangan",   callback_data="genre_adventure")],
     ]
 
     await update.message.reply_text(
         "Pilih genre cerita:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
-
-# =========================================================
-# PILIH GENRE
-# =========================================================
-async def select_genre(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    genre = query.data.split("_")[1]
-
-    prompts = {
-
-        "romcom": """
+# ----------------------------------------------------------------------
+# 2️⃣ Genre selection
+# ----------------------------------------------------------------------
+GENRE_PROMPTS = {
+    "romcom": """
 Romantis komedi dewasa realistis.
 
 JANGAN:
 - teleport lokasi
-- ubah waktu tiba-tiba
+- ubah waktu tiba‑tiba
 - karakter tahu isi pikiran lawan bicara
 - karakter berbicara mustahil dari jarak jauh
 - meta knowledge NPC
@@ -87,8 +105,7 @@ WAJIB:
 - transisi realistis
 - dialog natural
 """,
-
-        "adventure": """
+    "adventure": """
 Petualangan dramatis realistis.
 
 JANGAN:
@@ -100,273 +117,174 @@ WAJIB:
 - transisi adegan jelas
 - lokasi konsisten
 - waktu konsisten
-"""
-    }
+""",
+}
 
-    await memory.set_genre(
-        query.from_user.id,
-        genre,
-        prompts[genre]
-    )
-
-    await query.edit_message_text(
-        f"Genre dipilih: {genre}\n\nKirim premis cerita awal."
-    )
-
-
-# =========================================================
-# MENU MODEL
-# =========================================================
-async def model_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    keyboard = []
-
-    for label, model_name in AVAILABLE_MODELS.items():
-
-        keyboard.append([
-            InlineKeyboardButton(
-                label,
-                callback_data=f"model_{model_name}"
-            )
-        ])
-
-    await update.message.reply_text(
-        "Pilih model AI:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-# =========================================================
-# PILIH MODEL
-# =========================================================
-async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+async def select_genre(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-
     await query.answer()
 
-    model_name = query.data.replace(
-        "model_",
-        ""
-    )
-
-    await memory.users.update_one(
-        {"_id": query.from_user.id},
-        {
-            "$set": {
-                "selected_model": model_name
-            }
-        }
-    )
+    genre = query.data.split("_")[1]          # "romcom" atau "adventure"
+    await set_genre(query.from_user.id, genre, GENRE_PROMPTS[genre])
 
     await query.edit_message_text(
-        f"✅ Model aktif:\n\n{model_name}"
+        f"✅ Genre dipilih: *{genre}*\n\nKirim premis cerita awal.",
+        parse_mode="Markdown",
     )
 
-
-# =========================================================
-# CHAT ENGINE
-# =========================================================
-async def chat_engine(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user_id = update.effective_user.id
-
-    user_msg = update.message.text
-
-    data = await memory.get_user(user_id)
-
-    if not data:
+# ----------------------------------------------------------------------
+# 3️⃣ Model menu
+# ----------------------------------------------------------------------
+async def model_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not AVAILABLE_MODELS:
+        await update.message.reply_text(
+            "⚠️ Tidak ada model AI yang terdaftar di `config.AVAILABLE_MODELS`."
+        )
         return
 
-    if data.get("state") != "STORY":
+    keyboard = [
+        [InlineKeyboardButton(label, callback_data=f"model_{model_name}")]
+        for label, model_name in AVAILABLE_MODELS.items()
+    ]
+    await update.message.reply_text(
+        "Pilih model AI:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+# ----------------------------------------------------------------------
+# 4️⃣ Pilih model (inline callback)
+# ----------------------------------------------------------------------
+async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    model_name = query.data.removeprefix("model_")
+    await users.update_one(
+        {"_id": query.from_user.id},
+        {"$set": {"selected_model": model_name}},
+    )
+    await query.edit_message_text(f"✅ Model aktif:\n\n`{model_name}`", parse_mode="Markdown")
+
+# ----------------------------------------------------------------------
+# 5️⃣ Chat engine – core story generation
+# ----------------------------------------------------------------------
+MAX_INPUT_LEN = 3500
+MAX_OUTPUT_LEN = 4000
+
+async def chat_engine(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_msg = update.message.text.strip()
+
+    if len(user_msg) > MAX_INPUT_LEN:
+        await update.message.reply_text(
+            f"⚠️ Pesan terlalu panjang ({len(user_msg)} karakter). "
+            f"Gunakan ≤ {MAX_INPUT_LEN} karakter."
+        )
+        return
+
+    data = await get_user(user_id)
+    if not data or data.get("state") != "STORY":
         return
 
     story = data["story"]
 
-    # build prompt
-    prompt = build_prompt(
-        story,
-        user_msg
+    # build final prompt
+    prompt = build_prompt(story, user_msg)
+    await save_last_prompt(user_id, prompt)
+
+    # typing indicator
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action=ChatAction.TYPING,
     )
 
-    # save last prompt
-    await save_last_prompt(
-        user_id,
-        prompt
-    )
+    selected_model = data.get("selected_model", "gemini-2.5-flash")
+    log.info("User %s – model %s", user_id, selected_model)
 
     try:
-
-        selected_model = data.get(
-            "selected_model",
-            "gemini-2.5-flash"
-        )
-
-        print(f"TRY MODEL: {selected_model}")
-
-        ai_text, model = await generate(
-            prompt,
-            selected_model
-        )
-
-        # fallback
-        if model == "fallback":
-
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "🔁 Retry Last Prompt",
-                        callback_data="retry_last"
-                    )
-                ]
-            ]
-
-            await update.message.reply_text(
-                ai_text,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-
-            return
-
-        # save archive
-        await memory.update_story(
-            user_id,
-            story,
-            ai_text,
-            user_msg
-        )
-
-        # save regenerate data
-        await memory.set_last_scene(
-            user_id,
-            prompt,
-            ai_text,
-            story
-        )
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "🔁 Regenerate",
-                    callback_data="regen"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📖 Replay Story",
-                    callback_data="replay"
-                )
-            ]
-        ]
-
-        safe_text = ai_text[:3500]
-
+        ai_text, model_used = await _generate_limited(prompt, selected_model)
+    except Exception as exc:
+        log.exception("Generate failed")
         await update.message.reply_text(
-            safe_text + f"\n\n🤖 {model}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            "❌ Terjadi error saat memanggil AI. Coba lagi nanti."
         )
-
-    except Exception as e:
-
-        print("CHAT ENGINE ERROR:", e)
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "🔁 Retry Last Prompt",
-                    callback_data="retry_last"
-                )
-            ]
-        ]
-
-        await update.message.reply_text(
-            "Terjadi error saat proses AI.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-
-# =========================================================
-# REGENERATE
-# =========================================================
-async def regenerate(update, context):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    last_scene = await memory.get_last_scene(
-        query.from_user.id
-    )
-
-    if not last_scene:
-
-        await query.message.reply_text(
-            "Tidak ada scene terakhir."
-        )
-
         return
 
-    # simpan mode regenerate
-    context.user_data["regen_scene"] = last_scene
+    # Fallback handling (optional)
+    if model_used == "fallback":
+        await update.message.reply_text(
+            ai_text,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔁 Retry Last Prompt", callback_data="retry_last")]]
+            ),
+        )
+        return
 
-    keyboard = []
+    # Simpan scene ke DB
+    await update_story(user_id, story, ai_text, user_msg)
+    await set_last_scene(user_id, prompt, ai_text, story)
 
-    for label, model_name in AVAILABLE_MODELS.items():
+    # Inline keyboard untuk Regenerate / Replay
+    keyboard = [
+        [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")],
+        [InlineKeyboardButton("📖 Replay Story", callback_data="replay")],
+    ]
 
-        keyboard.append([
-            InlineKeyboardButton(
-                label,
-                callback_data=f"regenmodel_{model_name}"
-            )
-        ])
-
-    await query.message.reply_text(
-        "Pilih model untuk regenerate:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    safe_text = ai_text[:MAX_OUTPUT_LEN]
+    await update.message.reply_text(
+        f"{safe_text}\n\n🤖 {model_used}",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
-
-# =========================================================
-# PILIH MODEL REGENERATE
-# =========================================================
-async def select_regen_model(update, context):
-
+# ----------------------------------------------------------------------
+# 6️⃣ Regenerate flow
+# ----------------------------------------------------------------------
+async def regenerate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-
     await query.answer()
 
-    model_name = query.data.replace(
-        "regenmodel_",
-        ""
+    last_scene = await get_last_scene(query.from_user.id)
+    if not last_scene:
+        await query.message.reply_text("❌ Tidak ada scene terakhir.")
+        return
+
+    # Simpan data scene di user_data untuk dipakai di langkah berikutnya
+    context.user_data["regen_scene"] = last_scene
+
+    # Tampilkan pilihan model untuk regenerate
+    keyboard = [
+        [InlineKeyboardButton(label, callback_data=f"regenmodel_{model_name}")]
+        for label, model_name in AVAILABLE_MODELS.items()
+    ]
+    await query.message.reply_text(
+        "Pilih model untuk regenerate:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
+# ----------------------------------------------------------------------
+# 7️⃣ Pilih model saat Regenerate
+# ----------------------------------------------------------------------
+async def select_regen_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    model_name = query.data.removeprefix("regenmodel_")
     context.user_data["regen_model"] = model_name
 
     await query.message.reply_text(
-        "Kirim revisi/perbaikan cerita.\n\n"
-        "Contoh:\n"
-        "- jangan pindah lokasi\n"
-        "- Nina jangan langsung menggoda\n"
-        "- buat dialog lebih realistis"
+        "Kirim revisi / perbaikan cerita (contoh: “jangan pindah lokasi”)."
     )
 
-
-# =========================================================
-# REWRITE
-# =========================================================
-async def rewrite(update, context):
-
+# ----------------------------------------------------------------------
+# 8️⃣ Rewrite (regenerate dengan revisi)
+# ----------------------------------------------------------------------
+async def rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "regen_scene" not in context.user_data:
-        return
+        return  # bukan mode regenerate
 
     last = context.user_data["regen_scene"]
-
-    model_name = context.user_data.get(
-        "regen_model",
-        "gemini-2.5-flash"
-    )
-
-    user_revision = update.message.text
+    model_name = context.user_data.get("regen_model", "gemini-2.5-flash")
+    user_revision = update.message.text.strip()
 
     prompt = f"""
 TUGAS:
@@ -380,190 +298,131 @@ PERBAIKAN USER:
 
 ATURAN:
 - jangan ubah karakter
-- jangan ubah lokasi tiba-tiba
-- jangan ubah waktu tiba-tiba
+- jangan ubah lokasi tiba‑tiba
+- jangan ubah waktu tiba‑tiba
 - dialog realistis
-- jangan meta knowledge NPC
+- jangan meta‑knowledge NPC
 - pertahankan inti adegan
 """
 
-    await update.message.reply_text(
-        f"🔄 Regenerate pakai:\n{model_name}"
-    )
+    await update.message.reply_text(f"🔄 Regenerate pakai **{model_name}**...", parse_mode="Markdown")
 
-    ai_text, model = await generate(
-        prompt,
-        model_name
-    )
+    try:
+        ai_text, model_used = await _generate_limited(prompt, model_name)
+    except Exception as exc:
+        log.exception("Regenerate failed")
+        await update.message.reply_text("❌ Gagal regenerate. Coba lagi.")
+        return
 
-    # hapus mode regenerate
-    context.user_data.pop(
-        "regen_scene",
-        None
-    )
-
-    context.user_data.pop(
-        "regen_model",
-        None
-    )
+    # bersihkan state
+    context.user_data.pop("regen_scene", None)
+    context.user_data.pop("regen_model", None)
 
     keyboard = [
-        [
-            InlineKeyboardButton(
-                "🔁 Regenerate Lagi",
-                callback_data="regen"
-            )
-        ]
+        [InlineKeyboardButton("🔁 Regenerate Lagi", callback_data="regen")]
     ]
 
     await update.message.reply_text(
-        ai_text[:3500] + f"\n\n🤖 {model}",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"{ai_text[:MAX_OUTPUT_LEN]}\n\n🤖 {model_used}",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
-# =========================================================
-# MESSAGE ROUTER
-# =========================================================
-async def message_router(update, context):
 
-    if "regen" in context.user_data:
-
+# ----------------------------------------------------------------------
+# 9️⃣ Message router (deteksi apakah sedang dalam mode regenerate)
+# ----------------------------------------------------------------------
+async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if "regen_scene" in context.user_data:
         await rewrite(update, context)
-
     else:
-
         await chat_engine(update, context)
 
-# =========================================================
-# REPLAY STORY
-# =========================================================
+# ----------------------------------------------------------------------
+# 🔟 Replay story (tanpa menyimpan file)
+# ----------------------------------------------------------------------
 async def replay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
-
     await query.answer()
 
-    archive = await get_full_story(
-        query.from_user.id
-    )
-
+    archive = await get_full_story(query.from_user.id)
     if not archive:
-
-        await query.message.reply_text(
-            "Belum ada story."
-        )
-
+        await query.message.reply_text("❌ Belum ada story.")
         return
 
-    text = "📖 FULL STORY REPLAY\n\n"
-
+    # Bagi teks menjadi bagian ≤ 4000 karakter
+    parts = []
+    buffer = ""
     for scene in archive:
-
-        text += (
+        txt = (
             f"━━━━━━━━━━━━━━━━━━\n"
             f"TURN: {scene['turn']}\n\n"
+            f"USER:\n{scene['user']}\n\n"
+            f"AI:\n{scene['ai']}\n\n"
+        )
+        if len(buffer) + len(txt) > 4000:
+            parts.append(buffer)
+            buffer = txt
+        else:
+            buffer += txt
+    parts.append(buffer)
 
-            f"USER:\n"
-            f"{scene['user']}\n\n"
-
-            f"AI:\n"
-            f"{scene['ai']}\n\n"
+    for idx, part in enumerate(parts, start=1):
+        await query.message.reply_text(
+            f"📖 FULL STORY REPLAY (bagian {idx}/{len(parts)})\n\n{part}",
+            disable_web_page_preview=True,
         )
 
-    filename = f"story_{query.from_user.id}.txt"
-
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(text)
-
-    with open(filename, "rb") as f:
-
-        await query.message.reply_document(
-            document=f,
-            filename=filename,
-            caption="📖 Replay story berhasil dibuat."
-        )
-
-
-# =========================================================
-# RETRY LAST PROMPT
-# =========================================================
+# ----------------------------------------------------------------------
+# 🔁 Retry last prompt
+# ----------------------------------------------------------------------
 async def retry_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
-
     await query.answer()
 
     user_id = query.from_user.id
-
     prompt = await get_last_prompt(user_id)
-
     if not prompt:
-
-        await query.message.reply_text(
-            "Tidak ada prompt terakhir."
-        )
-
+        await query.message.reply_text("❌ Tidak ada prompt terakhir.")
         return
 
-    await query.message.reply_text(
-        "🔄 Mengulang proses terakhir..."
+    await query.message.reply_text("🔄 Mengulang proses terakhir...")
+
+    data = await get_user(user_id)
+    selected_model = data.get("selected_model", "gemini-2.5-flash")
+
+    try:
+        ai_text, model_used = await _generate_limited(prompt, selected_model)
+    except Exception as exc:
+        log.exception("Retry failed")
+        await query.message.reply_text("❌ Gagal mengulang prompt.")
+        return
+
+    await query.message.reply_text(f"{ai_text[:MAX_OUTPUT_LEN]}\n\n🤖 {model_used}")
+
+# ----------------------------------------------------------------------
+# ⚙️ Error handler
+# ----------------------------------------------------------------------
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    log.exception("Exception while handling an update:", exc_info=context.error)
+    # (Opsional) beri feedback ke pengguna
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text("⚠️ Terjadi error internal. Silakan coba lagi nanti.")
+
+# ----------------------------------------------------------------------
+# 📋 Set Telegram command menu
+# ----------------------------------------------------------------------
+async def set_bot_commands(app: Application):
+    await app.bot.set_my_commands(
+        [
+            BotCommand("start", "🏠 Mulai / pilih genre"),
+            BotCommand("model", "🤖 Pilih model AI"),
+            BotCommand("replay", "📖 Replay story"),
+            BotCommand("regen", "🔁 Regenerate scene"),
+        ]
     )
 
-    data = await memory.get_user(user_id)
-
-    selected_model = data.get(
-        "selected_model",
-        "gemini-2.5-flash"
-    )
-
-    ai_text, model = await generate(
-        prompt,
-        selected_model
-    )
-
-    await query.message.reply_text(
-        ai_text[:3500] + f"\n\n🤖 {model}"
-    )
-
-
-# =========================================================
-# ERROR HANDLER
-# =========================================================
-async def error_handler(update, context):
-
-    print("ERROR:", context.error)
-# =========================================================
-# SET TELEGRAM MENU
-# =========================================================
-async def set_bot_commands(app):
-
-    commands = [
-
-        BotCommand(
-            "start",
-            "🏠 Menu Utama"
-        ),
-
-        BotCommand(
-            "model",
-            "🤖 Pilih Model AI"
-        ),
-
-        BotCommand(
-            "replay",
-            "📖 Replay Story"
-        ),
-
-        BotCommand(
-            "regen",
-            "🔁 Regenerate Scene"
-        )
-    ]
-
-    await app.bot.set_my_commands(commands)
-
-# =========================================================
-# MAIN
-# =========================================================
+# ----------------------------------------------------------------------
+# 🚀 Main
+# ----------------------------------------------------------------------
 def main() -> None:
     app = (
         Application.builder()
@@ -572,48 +431,34 @@ def main() -> None:
         .read_timeout(30)
         .write_timeout(30)
         .pool_timeout(30)
-        .post_init(set_bot_commands)   # <-- set_bot_commands dipanggil otomatis
+        .post_init(set_bot_commands)      # set menu otomatis
         .build()
     )
 
-    # ----------------- COMMAND HANDLERS -----------------
+    # COMMANDS
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("model", model_menu))
-    # NOTE: /replay & /regen tidak perlu ditambahkan lagi karena
-    # nanti dipanggil lewat callback query (tombol)
 
-    # ----------------- CALLBACK HANDLERS -----------------
-    app.add_handler(
-        CallbackQueryHandler(select_genre, pattern=r"^genre_")
-    )
-    app.add_handler(
-        CallbackQueryHandler(select_model, pattern=r"^model_")
-    )
-    app.add_handler(
-        CallbackQueryHandler(regenerate, pattern=r"^regen$")
-    )
-    app.add_handler(
-        CallbackQueryHandler(select_regen_model, pattern=r"^regenmodel_")
-    )
-    app.add_handler(
-        CallbackQueryHandler(replay, pattern=r"^replay$")
-    )
-    app.add_handler(
-        CallbackQueryHandler(retry_last, pattern=r"^retry_last$")
-    )
+    # CALLBACKS
+    app.add_handler(CallbackQueryHandler(select_genre, pattern=r"^genre_"))
+    app.add_handler(CallbackQueryHandler(select_model, pattern=r"^model_"))
+    app.add_handler(CallbackQueryHandler(regenerate, pattern=r"^regen$"))
+    app.add_handler(CallbackQueryHandler(select_regen_model, pattern=r"^regenmodel_"))
+    app.add_handler(CallbackQueryHandler(replay, pattern=r"^replay$"))
+    app.add_handler(CallbackQueryHandler(retry_last, pattern=r"^retry_last$"))
 
-    # ----------------- MESSAGE HANDLER -----------------
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, message_router)
-    )
+    # MESSAGE (text)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_router))
 
-    # ----------------- ERROR HANDLER -----------------
+    # ERRORS
     app.add_error_handler(error_handler)
 
-    # ----------------- RUN -----------------
-    logging.info("🚀 Bot running...")
+    log.info("🚀 Bot berjalan...")
     app.run_polling(
         poll_interval=1,
         timeout=30,
-        drop_pending_updates=True
+        drop_pending_updates=True,
     )
+
+if __name__ == "__main__":
+    main()
