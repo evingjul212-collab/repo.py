@@ -99,7 +99,7 @@ async def fetch_dynamic_gemma() -> List[str]:
     import google.generativeai as genai
     from google.api_core import exceptions as google_exceptions
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY belum diset")
     genai.configure(api_key=api_key)
