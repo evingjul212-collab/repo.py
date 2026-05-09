@@ -182,14 +182,14 @@ try:
                 [InlineKeyboardButton("📖 Replay Story", callback_data="replay")]
         ]
 
-        safe_text = ai_text[:3500]
+            safe_text = ai_text[:3500]
 
             await update.message.reply_text(
             safe_text + f"\n\n🤖 {model}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    except Exception as e:
+        except Exception as e:
 
         print("CHAT ENGINE ERROR:", e)
 
