@@ -38,7 +38,7 @@ async def answer_ai(user_text: str) -> str:
         # Pilihan model: gpt_3_5_turbo (lebih stabil) atau gpt_4 (lebih kuat)
         # Kamu bisa mengganti sesuai kebutuhan:
         # model = g4f.models.gpt_4
-        model = g4f.models.gpt_3_5_turbo
+        model = g4f.models.gemini-2.5-flash
 
         # `g4f.ChatCompletion.create` mengembalikan string langsung
         response = g4f.ChatCompletion.create(
