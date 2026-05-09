@@ -1,3 +1,6 @@
-python-telegram-bot==21.2
-git+https://github.com/xtekky/g4f.git@main#egg=g4f
-httpx==0.27.0          # opsional, tapi berguna
+# pip packages yang diperlukan
+python-telegram-bot==21.2                     # atau versi terbaru yang Anda inginkan
+httpx==0.27.0                                # opsional, untuk logging yang lebih bersih
+
+# <-- PENTING – G4F dari GitHub dengan prefix git+ -->
+git+https://github.com/xtekky/g4f.git#egg=g4f
