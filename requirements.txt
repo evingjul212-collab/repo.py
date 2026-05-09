@@ -1,4 +1,3 @@
 python-telegram-bot==21.2
-g4f     # versi terbaru saat tulisan ini dibuat
-# Jika ada warning tentang "httpx" atau "httpx[socks]" tambahkan:
-httpx==0.27.0
+git+https://github.com/xtekky/g4f.git@main#egg=g4f
+httpx==0.27.0          # opsional, tapi berguna
