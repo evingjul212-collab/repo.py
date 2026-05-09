@@ -1,92 +1,162 @@
-# bot.py
+# -------------------------------------------------
+# bot.py – Bot Telegram dengan auto‑scan model g4f
+# -------------------------------------------------
 import os
 import logging
-import asyncio
+from typing import List, Optional
 
-import g4f
-from telegram import Update
+from telegram import Update, ChatAction
 from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
+    Application,
     CommandHandler,
     MessageHandler,
+    ContextTypes,
     filters,
 )
 
-# ---------- Logging ----------
+import g4f
+from g4f.models import Model   # enum yang berisi semua model yang tersedia
+
+# -------------------------------------------------
+# Logging
+# -------------------------------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
-# ---------- Bot Token ----------
-# Railway (atau Heroku, Render, dll) menyimpan token sebagai environment variable.
-# Pastikan variabelnya bernama TELEGRAM_TOKEN.
-BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-if not BOT_TOKEN:
-    logger.error("❌  Environment variable TELEGRAM_TOKEN tidak ditemukan!")
-    raise SystemExit("Set environment variable TELEGRAM_TOKEN first.")
+# -------------------------------------------------
+# Cache (in‑memory) untuk model yang sudah terbukti berhasil
+# -------------------------------------------------
+_successful_model: Optional[Model] = None
 
-# ---------- Helper ----------
-async def answer_ai(user_text: str) -> str:
+
+def set_successful_model(m: Model) -> None:
+    global _successful_model
+    _successful_model = m
+
+
+def get_successful_model() -> Optional[Model]:
+    return _successful_model
+
+
+# -------------------------------------------------
+# Daftar prioritas model (urutkan sesuai biaya/kecepatan)
+# -------------------------------------------------
+def list_all_models() -> List[Model]:
+    # Urutan yang biasanya paling murah/tercepat
+    priority = [
+        Model.gpt_3_5_turbo,
+        Model.gpt_4,
+        Model.gpt_4_1106_preview,
+        Model.gpt_4o,
+        Model.gpt_4o_mini,
+    ]
+
+    # Pastikan semua ada di enum (untuk versi g4f yang lebih lama)
+    available = [m for m in priority if hasattr(Model, m.name)]
+
+    # Tambahkan sisa model yang tidak ada di `priority` di akhir list
+    extra = [m for m in Model if m not in available]
+    return available + extra
+
+
+# -------------------------------------------------
+# Fungsi utama: kirim prompt ke AI dengan auto‑scan model
+# -------------------------------------------------
+async def answer_ai(user_prompt: str) -> str:
     """
-    Memanggil g4f untuk mendapatkan respons AI.
-    Jika provider tertentu gagal, akan coba provider lain secara otomatis.
+    Coba model yang sudah di‑cache dulu, bila gagal scan semua yang ada.
+    Return string balasan atau fallback jika semua gagal.
     """
-    try:
-        # Pilihan model: gpt_3_5_turbo (lebih stabil) atau gpt_4 (lebih kuat)
-        # Kamu bisa mengganti sesuai kebutuhan:
-        # model = g4f.models.gpt_4
-        model = g4f.models.gemini-2.5-flash
+    # 1️⃣ Coba model cache (jika ada)
+    cached = get_successful_model()
+    if cached:
+        try:
+            log.info(f"🔎 Mencoba model cache: {cached.name}")
+            resp = g4f.ChatCompletion.create(
+                model=cached,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            return resp
+        except Exception as e:
+            log.warning(f"Cache {cached.name} gagal ({type(e).__name__}): {e}")
+            set_successful_model(None)          # reset cache
 
-        # `g4f.ChatCompletion.create` mengembalikan string langsung
-        response = g4f.ChatCompletion.create(
-            model=model,
-            messages=[{"role": "user", "content": user_text}],
-        )
-        return response
-    except Exception as e:
-        logger.exception("⚡️ g4f error")
-        return f"Maaf, ada masalah dengan AI: {e}"
+    # 2️⃣ Scan semua model yang tersedia
+    for model in list_all_models():
+        try:
+            log.info(f"🔎 Mencoba model: {model.name}")
+            resp = g4f.ChatCompletion.create(
+                model=model,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            # Jika sampai sini tidak exception, berarti berhasil
+            set_successful_model(model)
+            log.info(f"✅ Model berhasil: {model.name}")
+            return resp
+        except Exception as e:
+            log.warning(f"Model {model.name} gagal ({type(e).__name__}): {e}")
+            continue
 
-
-# ---------- Handlers ----------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Halo! Saya bot AI gratis (g4f). Ketik apa saja, saya akan menjawab."
+    # 3️⃣ Semua gagal → fallback
+    log.error("❌ Semua model g4f gagal. Mengirim fallback.")
+    return (
+        "Maaf, layanan AI sedang tidak tersedia. "
+        "Silakan coba lagi dalam beberapa menit."
     )
 
 
-async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# -------------------------------------------------
+# Handlers Telegram
+# -------------------------------------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "👋 Halo! Saya bot AI dengan auto‑scan model. "
+        "Ketik apa saja, saya akan menjawab."
+    )
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_msg = update.message.text.strip()
-    # Kirim 'typing...' supaya user tahu bot sedang berpikir
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    answer = await answer_ai(user_msg)
-    await update.message.reply_text(answer)
+    if not user_msg:
+        return
+
+    # Tunjukkan “mengetik…”
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action=ChatAction.TYPING,
+    )
+
+    try:
+        answer = await answer_ai(user_msg)
+        await update.message.reply_text(answer)
+    except Exception as exc:
+        log.exception("⚡️ g4f error")
+        await update.message.reply_text(
+            "Terjadi kesalahan internal. Silakan coba lagi."
+        )
 
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Log semua error."""
-    logger.exception(msg="Exception while handling an update:", exc_info=context.error)
-
-
-# ---------- Main ----------
+# -------------------------------------------------
+# Main – inisialisasi bot
+# -------------------------------------------------
 def main() -> None:
-    # Buat aplikasi Telegram
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    token = os.getenv("TELEGRAM_TOKEN")
+    if not token:
+        raise RuntimeError("🛑 Env var TELEGRAM_TOKEN belum di‑set!")
 
-    # Daftarkan handler
+    app = Application.builder().token(token).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
-    app.add_error_handler(error_handler)
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+    )
 
-    # Jalankan bot (polling)
-    logger.info("🚀 Bot mulai polling...")
+    log.info("🚀 Bot mulai polling...")
     app.run_polling()
 
 
 if __name__ == "__main__":
-    # Untuk Railway ini tidak diperlukan `asyncio.run(main())` karena `run_polling`
-    # sudah men‑handle event‑loop secara internal.
     main()
