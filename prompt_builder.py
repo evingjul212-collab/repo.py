@@ -1,7 +1,7 @@
 def build_prompt(story, user_msg):
 
     return f"""
-KAMU ADALAH STORY ENGINE cerita dewasa 21+.
+KAMU ADALAH STORY ENGINE CERITA DEWASA 21+.
 
 ATURAN:
 - Cerita realistis dan natural.
