@@ -10,6 +10,7 @@ Telegram Bot – Gemini / Gemma
 import os
 import asyncio
 import logging
+from google import genai
 from typing import Dict, List, Tuple
 
 from telegram import (
@@ -124,7 +125,7 @@ async def fetch_dynamic_gemma() -> List[str]:
 # ----------------------------------------------------------------------
 async def ask_gemini(model_name: str, prompt: str) -> str:
     """Kirim prompt ke model yang dipilih dan kembalikan teks hasilnya."""
-    import google.generativeai as genai
+    # import google.generativeai as genai
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
