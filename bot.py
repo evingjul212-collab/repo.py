@@ -136,7 +136,7 @@ async def chat_engine(update: Update, context):
         "gemini-2.5-flash"
         )
 
-ai_text, model = await generate(
+    ai_text, model = await generate(
     prompt,
     selected_model
 )
