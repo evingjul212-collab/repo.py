@@ -337,7 +337,18 @@ ATURAN:
     await update.message.reply_text(
         ai_text[:3500] + f"\n\n🤖 {model}"
     )
+# =========================================================
+# MESSAGE ROUTER
+# =========================================================
+async def message_router(update, context):
 
+    if "regen" in context.user_data:
+
+        await rewrite(update, context)
+
+    else:
+
+        await chat_engine(update, context)
 
 # =========================================================
 # REPLAY STORY
@@ -499,20 +510,13 @@ def main():
         )
     )
 
-    # MESSAGE
+  # MESSAGE
     app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            rewrite
-        )
+    MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        message_router
     )
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            chat_engine
-        )
-    )
+)
 
     app.add_error_handler(error_handler)
 
