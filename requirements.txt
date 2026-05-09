@@ -1,11 +1,3 @@
-# Bot Telegram (versi 20+, async‑ready)
 python-telegram-bot==20.7
-
-# HTTP client
-httpx==0.27.0
-
-# .env (untuk token)
-python-dotenv==1.0.1
-
-# g4f – di‑install langsung dari PyPI (tidak perlu clone repo)
-g4f==0.5.8          # pastikan versi >= 0.5.7
+google-generativeai==0.5.4
+# (sqlite3 sudah ada di stdlib, tidak perlu di‑install)
