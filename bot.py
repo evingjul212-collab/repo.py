@@ -92,7 +92,7 @@ _CHAT_STATE: Dict[int, str] = {}       # chat_id -> model_name
 #     cur.execute("SELECT model FROM chat_state WHERE chat_id=?", (chat_id,))
 #     row = cur.fetchone()
 #     conn.close()
-#     return row[0] if row else "gemini-2.5-flash"
+#     return row[0] if row else "gemma-4-26b-a4b-it"
 
 # -------------------------------------------------
 def set_model(chat_id: int, model: str) -> None:
@@ -105,7 +105,7 @@ def set_model(chat_id: int, model: str) -> None:
 def get_model(chat_id: int) -> str:
     """Ambil model yang dipilih - default = gemini-2.5-flash."""
     # return _get_model_db(chat_id)    # uncomment bila menggunakan SQLite
-    return _CHAT_STATE.get(chat_id, "gemini-2.5-flash")
+    return _CHAT_STATE.get(chat_id, "gemma-4-26b-a4b-it")
 
 # -------------------------------------------------
 # ---------- 3️⃣ Fungsi pemanggilan Gemini ----------
@@ -143,7 +143,7 @@ async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
         "• /models - lihat daftar singkat model yang tersedia.\n"
         "• /setmodel <nama> - pilih model untuk percakapan ini.\n"
         "Contoh: /setmodel gemini-2.5-pro\n"
-        "Model default saat pertama kali: **gemini-2.5-flash**"
+        "Model default saat pertama kali: **gemma-4-26b-a4b-it**"
     )
 
 
