@@ -131,7 +131,7 @@ async def chat_engine(update: Update, context):
 
     try:
 
-        selected_model = data.get(
+    selected_model = data.get(
         "selected_model",
         "gemini-2.5-flash"
         )
