@@ -564,8 +564,7 @@ async def set_bot_commands(app):
 # =========================================================
 # MAIN
 # =========================================================
-def main():
-
+def main() -> None:
     app = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -573,96 +572,48 @@ def main():
         .read_timeout(30)
         .write_timeout(30)
         .pool_timeout(30)
+        .post_init(set_bot_commands)   # <-- set_bot_commands dipanggil otomatis
         .build()
     )
 
-    # COMMANDS
+    # ----------------- COMMAND HANDLERS -----------------
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("model", model_menu))
+    # NOTE: /replay & /regen tidak perlu ditambahkan lagi karena
+    # nanti dipanggil lewat callback query (tombol)
+
+    # ----------------- CALLBACK HANDLERS -----------------
     app.add_handler(
-        CommandHandler("start", start)
+        CallbackQueryHandler(select_genre, pattern=r"^genre_")
+    )
+    app.add_handler(
+        CallbackQueryHandler(select_model, pattern=r"^model_")
+    )
+    app.add_handler(
+        CallbackQueryHandler(regenerate, pattern=r"^regen$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(select_regen_model, pattern=r"^regenmodel_")
+    )
+    app.add_handler(
+        CallbackQueryHandler(replay, pattern=r"^replay$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(retry_last, pattern=r"^retry_last$")
     )
 
+    # ----------------- MESSAGE HANDLER -----------------
     app.add_handler(
-        CommandHandler("model", model_menu)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, message_router)
     )
 
-    # CALLBACKS
-    app.add_handler(
-        CallbackQueryHandler(
-            select_genre,
-            pattern="^genre_"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            select_model,
-            pattern="^model_"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            regenerate,
-            pattern="^regen$"
-        )
-    )
-# PILIH MODEL REGENERATE
-    app.add_handler(
-    CallbackQueryHandler(
-        select_regen_model,
-        pattern="^regenmodel_"
-    )
-)
-    app.add_handler(
-        CallbackQueryHandler(
-            replay,
-            pattern="^replay$"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            retry_last,
-            pattern="^retry_last$"
-        )
-    )
-
-  # MESSAGE
-    app.add_handler(
-    MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        message_router
-    )
-)
-
+    # ----------------- ERROR HANDLER -----------------
     app.add_error_handler(error_handler)
 
-    print("BOT RUNNING")
-
-# set menu telegram
-    app.post_init = set_bot_commands
-
+    # ----------------- RUN -----------------
+    logging.info("🚀 Bot running...")
     app.run_polling(
         poll_interval=1,
         timeout=30,
         drop_pending_updates=True
     )
-    app.add_handler(
-    CommandHandler(
-        "replay",
-        replay
-    )
-)
-
-    app.add_handler(
-    CommandHandler(
-        "regen",
-        regenerate
-    )
-)
-
-# =========================================================
-# RUN
-# =========================================================
-if __name__ == "__main__":
-    main()
