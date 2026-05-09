@@ -177,14 +177,14 @@ try:
             story
         )
 
-        keyboard = [
-            [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")],
-            [InlineKeyboardButton("📖 Replay Story", callback_data="replay")]
+            keyboard = [
+                [InlineKeyboardButton("🔁 Regenerate", callback_data="regen")],
+                [InlineKeyboardButton("📖 Replay Story", callback_data="replay")]
         ]
 
         safe_text = ai_text[:3500]
 
-        await update.message.reply_text(
+            await update.message.reply_text(
             safe_text + f"\n\n🤖 {model}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
