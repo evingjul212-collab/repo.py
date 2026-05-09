@@ -161,7 +161,7 @@ try:
             return
 
         # save archive story
-        await memory.update_story(
+            await memory.update_story(
             user_id,
             story,
             ai_text,
@@ -170,7 +170,7 @@ try:
         )
 
         # save regenerate memory
-        await memory.set_last_scene(
+            await memory.set_last_scene(
             user_id,
             prompt,
             ai_text,
