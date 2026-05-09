@@ -1,221 +1,311 @@
-# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-Telegram bot yang hanya memakai Google Gemini API‑Key
-dengan kemampuan memilih model (mis: gemini-2.5-flash, gemini-3.1-flash-lite-preview, dll.).
+Telegram Bot – Gemini / Gemma
+* User memilih model lewat tombol inline (tidak perlu mengetik).
+* Daftar model (Gemini + semua varian Gemma) dapat di‑update secara dinamis.
 """
 
 import os
-import logging
 import asyncio
-from typing import Dict, List
+import logging
+from typing import Dict, List, Tuple
 
-from telegram import Update, constants
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    constants,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
+    CallbackQueryHandler,
     filters,
 )
 
-# -------------------------------------------------
+# ----------------------------------------------------------------------
 # Logging
-# -------------------------------------------------
+# ----------------------------------------------------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 log = logging.getLogger(__name__)
 
-# -------------------------------------------------
-# ---------- 1️⃣ Daftar Model Gemini ----------
-# -------------------------------------------------
-# Daftar singkat yang akan ditampilkan ke user.
-# Anda dapat menambah / mengurangi sesuai kebutuhan.
+# ----------------------------------------------------------------------
+# Daftar model yang dapat dipilih (statik)
+# ----------------------------------------------------------------------
+# Nama‑nama **tanpa** prefix "models/".  Urutan tidak penting, hanya agar
+# mudah dibaca di /models dan pada tombol.
 AVAILABLE_MODELS: List[str] = [
-    "gemini-3.1-flash-lite-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    # ==== Gemini =======================================================
     "gemini-2.0-flash",
     "gemini-2.0-flash-001",
     "gemini-2.0-flash-lite",
+    "gemini-2.0-flash-lite-001",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-image",
     "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
     "gemini-2.5-pro-preview-tts",
     "gemini-2.5-flash-preview-tts",
-    "gemini-pro-latest",
-    "gemini-3-pro-preview",
     "gemini-3-flash-preview",
+    "gemini-3-pro-preview",
     "gemini-3.1-pro-preview",
-    # Tambahkan model lain bila diperlukan
+    "gemini-3.1-pro-preview-customtools",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-image-preview",
+    "gemini-3.1-flash-tts-preview",
+    "gemini-pro-latest",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    # ==== Gemma ========================================================
+    "gemma-3-1b-it",
+    "gemma-3-4b-it",
+    "gemma-3-12b-it",
+    "gemma-3-27b-it",
+    "gemma-3n-e2b-it",
+    "gemma-3n-e4b-it",
+    "gemma-4-26b-a4b-it",
+    "gemma-4-31b-it",
 ]
 
-# -------------------------------------------------
-# ---------- 2️⃣ Penyimpanan pilihan per‑chat ----------
-# -------------------------------------------------
-# In‑memory dictionary (hilang saat restart).
-# Jika ingin persist gunakan SQLite (lihat komentar di bawah).
+# ----------------------------------------------------------------------
+# In‑memory state: chat_id → model_name
+# ----------------------------------------------------------------------
+_CHAT_STATE: Dict[int, str] = {}
 
-_CHAT_STATE: Dict[int, str] = {}       # chat_id -> model_name
-
-# -------------------------------------------------
-# Opsional: SQLite persistence (aktifkan bila butuh)
-# -------------------------------------------------
-# import sqlite3
-# _DB_PATH = "chat_state.db"
-#
-# def _init_db():
-#     conn = sqlite3.connect(_DB_PATH)
-#     cur = conn.cursor()
-#     cur.execute(
-#         "CREATE TABLE IF NOT EXISTS chat_state (chat_id INTEGER PRIMARY KEY, model TEXT)"
-#     )
-#     conn.commit()
-#     conn.close()
-#
-# _init_db()
-#
-# def _set_model_db(chat_id: int, model: str):
-#     conn = sqlite3.connect(_DB_PATH)
-#     cur = conn.cursor()
-#     cur.execute(
-#         "INSERT INTO chat_state(chat_id, model) VALUES(?,?) "
-#         "ON CONFLICT(chat_id) DO UPDATE SET model=excluded.model",
-#         (chat_id, model),
-#     )
-#     conn.commit()
-#     conn.close()
-#
-# def _get_model_db(chat_id: int) -> str:
-#     conn = sqlite3.connect(_DB_PATH)
-#     cur = conn.cursor()
-#     cur.execute("SELECT model FROM chat_state WHERE chat_id=?", (chat_id,))
-#     row = cur.fetchone()
-#     conn.close()
-#     return row[0] if row else "gemma-4-26b-a4b-it"
-
-# -------------------------------------------------
 def set_model(chat_id: int, model: str) -> None:
-    """Simpan pilihan model untuk chat tertentu."""
-    model = model.lower()
-    _CHAT_STATE[chat_id] = model
-    # _set_model_db(chat_id, model)   # uncomment bila menggunakan SQLite
-
+    """Simpan pilihan model untuk satu chat."""
+    _CHAT_STATE[chat_id] = model.lower()
 
 def get_model(chat_id: int) -> str:
-    """Ambil model yang dipilih - default = gemini-2.5-flash."""
-    # return _get_model_db(chat_id)    # uncomment bila menggunakan SQLite
-    return _CHAT_STATE.get(chat_id, "gemma-4-26b-a4b-it")
+    """Model yang dipakai untuk chat ini. Default = gemini‑2.5‑flash."""
+    return _CHAT_STATE.get(chat_id, "gemini-2.5-flash")
 
-# -------------------------------------------------
-# ---------- 3️⃣ Fungsi pemanggilan Gemini ----------
-# -------------------------------------------------
+# ----------------------------------------------------------------------
+# (Opsional) Dapatkan semua model Gemma secara dinamis dari API Gemini
+# ----------------------------------------------------------------------
+async def fetch_dynamic_gemma() -> List[str]:
+    """
+    Ambil semua model yang mengandung kata “gemma” dari layanan Google.
+    Hasilnya berupa list nama (tanpa prefix “models/”).
+    """
+    import google.generativeai as genai
+    from google.api_core import exceptions as google_exceptions
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY belum diset")
+    genai.configure(api_key=api_key)
+
+    def _list():
+        return genai.list_models()
+
+    try:
+        models = await asyncio.to_thread(_list)
+    except google_exceptions.GoogleAPICallError as err:
+        log.error("Gagal ambil daftar model: %s", err)
+        return []
+
+    gemma = [
+        m.name.replace("models/", "")
+        for m in models
+        if "gemma" in m.name.lower()
+    ]
+    return sorted(gemma)
+
+# ----------------------------------------------------------------------
+# Fungsi untuk meng‑query Gemini / Gemma
+# ----------------------------------------------------------------------
 async def ask_gemini(model_name: str, prompt: str) -> str:
-    """
-    Kirim prompt ke Google Gemini dengan model yang diberikan.
-    """
+    """Kirim prompt ke model yang dipilih dan kembalikan teks hasilnya."""
     import google.generativeai as genai
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY belum diset di environment variables")
+        raise RuntimeError("GEMINI_API_KEY belum diset")
     genai.configure(api_key=api_key)
 
-    # Pastikan nama model lengkap: "models/<model>"
     full_name = f"models/{model_name}"
-    generative_model = genai.GenerativeModel(full_name)
+    model = genai.GenerativeModel(full_name)
 
-    # generate_content_async tersedia di versi 0.5.x
-    response = await generative_model.generate_content_async(prompt)
+    # generate_content_async tersedia pada versi >=0.5
+    response = await model.generate_content_async(prompt)
 
-    # response.text bisa None kalau output berupa Part list
-    if response.text:
+    # Beberapa model mengembalikan .text langsung, yang lain .parts
+    if getattr(response, "text", None):
         return response.text.strip()
-    return "".join(part.text for part in response.parts).strip()
+    # gabungkan semua part (biasanya .text)
+    return "".join(p.text for p in response.parts).strip()
 
-# -------------------------------------------------
-# ---------- 4️⃣ Bot Handlers ----------
-# -------------------------------------------------
+# ----------------------------------------------------------------------
+# Helper – Membuat Inline Keyboard (dengan pagination)
+# ----------------------------------------------------------------------
+PAGE_SIZE = 8      # berapa tombol per halaman (maks 10 untuk UI yang rapi)
+
+def _chunk(lst: List[str], size: int) -> List[List[str]]:
+    """Bagi list menjadi sub‑list berukuran `size`."""
+    return [lst[i:i + size] for i in range(0, len(lst), size)]
+
+def make_keyboard(page: int = 0) -> Tuple[InlineKeyboardMarkup, int]:
+    """
+    Buat `InlineKeyboardMarkup` untuk halaman `page`.
+    Mengembalikan (markup, total_pages).
+    """
+    chunks = _chunk(sorted(AVAILABLE_MODELS), PAGE_SIZE)
+    total_pages = len(chunks)
+
+    # Pastikan page berada di rentang yang valid
+    page = max(0, min(page, total_pages - 1))
+
+    buttons = [
+        [InlineKeyboardButton(txt, callback_data=f"SET#{txt}")]
+        for txt in chunks[page]
+    ]
+
+    # Tambahkan navigasi bila diperlukan
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"PAGE#{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"PAGE#{page+1}"))
+    if nav:
+        buttons.append(nav)
+
+    # Tombol “Batal” (opsional)
+    buttons.append([InlineKeyboardButton("❌ Batal", callback_data="CANCEL")])
+
+    return InlineKeyboardMarkup(buttons), total_pages
+
+# ----------------------------------------------------------------------
+# Handlers
+# ----------------------------------------------------------------------
 async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Halo! Saya bot Gemini yang dapat dipilih modelnya.\n"
-        "Gunakan perintah berikut:\n"
-        "• /models - lihat daftar singkat model yang tersedia.\n"
-        "• /setmodel <nama> - pilih model untuk percakapan ini.\n"
-        "Contoh: /setmodel gemini-2.5-pro\n"
-        "Model default saat pertama kali: **gemma-4-26b-a4b-it**"
+        "👋 Halo! Saya bot Gemini/Gemma.\n\n"
+        "📌 Perintah utama:\n"
+        "• /models → tampilkan semua model\n"
+        "• /setmodel → pilih model lewat tombol\n"
+        "Model default = **gemini-2.5-flash**",
+        parse_mode="Markdown",
     )
-
 
 async def list_models(update: Update, _: ContextTypes.DEFAULT_TYPE):
-    # Tampilkan dalam format markdown supaya mudah dibaca
     lines = [f"• `{m}`" for m in sorted(AVAILABLE_MODELS)]
-    txt = "*Model Gemini yang dapat dipilih*:\n" + "\n".join(lines)
+    txt = "*Model yang dapat dipilih*:\n" + "\n".join(lines)
     await update.message.reply_text(txt, parse_mode="Markdown")
 
-
-async def setmodel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text(
-            "⚠️ Perintah tidak lengkap. Pakai /setmodel <nama>.\n"
-            "Gunakan /models untuk melihat daftar nama yang valid."
-        )
-        return
-
-    chosen = context.args[0].lower()
-    if chosen not in AVAILABLE_MODELS:
-        await update.message.reply_text(
-            f"❌ Model `{chosen}` tidak dikenal.\n"
-            "Gunakan /models untuk melihat pilihan yang tersedia."
-        )
-        return
-
-    set_model(update.effective_chat.id, chosen)
+async def setmodel_cmd(update: Update, _: ContextTypes.DEFAULT_TYPE):
+    """
+    Kirimkan keyboard agar user memilih model.
+    Parameter tambahan tidak diperlukan; semua pilihan disajikan.
+    """
+    markup, _ = make_keyboard(page=0)
     await update.message.reply_text(
-        f"✅ Model untuk chat ini sudah di-set ke **{chosen}**.", parse_mode="Markdown"
+        "🛠️ Pilih model yang ingin Anda gunakan:",
+        reply_markup=markup,
     )
 
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tangani callback dari InlineKeyboard."""
+    query = update.callback_query
+    await query.answer()          # menghilangkan “Loading…” di UI
+
+    data = query.data
+
+    # ------------------- Batal -------------------
+    if data == "CANCEL":
+        await query.edit_message_text("❎ Pemilihan model dibatalkan.")
+        return
+
+    # ------------------- Pagination -------------------
+    if data.startswith("PAGE#"):
+        page = int(data.split("#")[1])
+        markup, _ = make_keyboard(page)
+        await query.edit_message_reply_markup(reply_markup=markup)
+        return
+
+    # ------------------- Set Model -------------------
+    if data.startswith("SET#"):
+        model_name = data.split("#")[1]
+        chat_id = query.message.chat.id
+        set_model(chat_id, model_name)
+
+        await query.edit_message_text(
+            f"✅ Model untuk chat ini **di‑set ke** `{model_name}`.",
+            parse_mode="Markdown",
+        )
+        return
+
+    # (fallback – tidak akan pernah tercapai)
+    await query.edit_message_text("⚠️ Tindakan tidak dikenali.")
 
 async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima pesan normal, kirim ke model yang telah dipilih."""
     chat_id = update.effective_chat.id
     model = get_model(chat_id)
 
-    # Tampilkan indikator "mengetik..."
+    # Tunjukkan “mengetik” ke user
     await context.bot.send_chat_action(
         chat_id=chat_id,
         action=constants.ChatAction.TYPING,
     )
 
-    user_prompt = update.message.text
+    prompt = update.message.text or ""
 
     try:
-        reply = await ask_gemini(model, user_prompt)
+        reply = await ask_gemini(model, prompt)
         await update.message.reply_text(reply)
-    except Exception as e:
-        log.exception("⚡️ Gemini error")
+    except Exception as exc:
+        log.exception("⚡️ Gemini/Gemma error")
         await update.message.reply_text(
-            f"❌ Terjadi error pada Gemini:\n<code>{e}</code>", parse_mode="HTML"
+            f"❌ Terjadi error pada API:\n<code>{exc}</code>",
+            parse_mode="HTML",
         )
 
-# -------------------------------------------------
-# ---------- 5️⃣ Main ----------
-# -------------------------------------------------
+# ----------------------------------------------------------------------
+# Main – entry point (Railway, Heroku, dll.)
+# ----------------------------------------------------------------------
 def main() -> None:
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
-        raise RuntimeError("TELEGRAM_TOKEN belum diset di environment variables")
+        raise RuntimeError("🛑 Variable TELEGRAM_TOKEN belum diset")
 
+    # -------------------------------------------------
+    # (Opsional) Tambahkan model Gemma yang ditemukan secara dinamis
+    # -------------------------------------------------
+    try:
+        loop = asyncio.get_event_loop()
+        dyn_gemma = loop.run_until_complete(fetch_dynamic_gemma())
+        for m in dyn_gemma:
+            if m not in AVAILABLE_MODELS:
+                AVAILABLE_MODELS.append(m)
+        if dyn_gemma:
+            log.info("✅ Ditambahkan %d model Gemma dinamis.", len(dyn_gemma))
+    except Exception as e:
+        log.warning("⚠️ Gagal memperbarui model Gemma secara dinamis: %s", e)
+
+    # -------------------------------------------------
+    # Buat aplikasi telegram
+    # -------------------------------------------------
     app = ApplicationBuilder().token(token).build()
 
-    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("models", list_models))
-    app.add_handler(CommandHandler("setmodel", setmodel))
+    app.add_handler(CommandHandler("setmodel", setmodel_cmd))
 
-    # Semua pesan teks (bukan command) diproses oleh answer
+    # Callback‑query (tombol)
+    app.add_handler(CallbackQueryHandler(callback_handler))
+
+    # Semua pesan teks (bukan perintah) diproses oleh `answer`
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, answer))
 
-    log.info("🚀 Bot mulai polling...")
+    log.info("🚀 Bot mulai polling…")
     app.run_polling()
 
 
