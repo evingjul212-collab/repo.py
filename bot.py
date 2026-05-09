@@ -287,55 +287,137 @@ async def chat_engine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================================================
 # REGENERATE
 # =========================================================
-async def regenerate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def regenerate(update, context):
 
     query = update.callback_query
 
     await query.answer()
 
-    last = await memory.get_last_scene(
+    last_scene = await memory.get_last_scene(
         query.from_user.id
     )
 
-    context.user_data["regen"] = last
+    if not last_scene:
+
+        await query.message.reply_text(
+            "Tidak ada scene terakhir."
+        )
+
+        return
+
+    # simpan mode regenerate
+    context.user_data["regen_scene"] = last_scene
+
+    keyboard = []
+
+    for label, model_name in AVAILABLE_MODELS.items():
+
+        keyboard.append([
+            InlineKeyboardButton(
+                label,
+                callback_data=f"regenmodel_{model_name}"
+            )
+        ])
 
     await query.message.reply_text(
-        "Kirim revisi cerita:"
+        "Pilih model untuk regenerate:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# =========================================================
+# PILIH MODEL REGENERATE
+# =========================================================
+async def select_regen_model(update, context):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    model_name = query.data.replace(
+        "regenmodel_",
+        ""
+    )
+
+    context.user_data["regen_model"] = model_name
+
+    await query.message.reply_text(
+        "Kirim revisi/perbaikan cerita.\n\n"
+        "Contoh:\n"
+        "- jangan pindah lokasi\n"
+        "- Nina jangan langsung menggoda\n"
+        "- buat dialog lebih realistis"
     )
 
 
 # =========================================================
 # REWRITE
 # =========================================================
-async def rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def rewrite(update, context):
 
-    if "regen" not in context.user_data:
+    if "regen_scene" not in context.user_data:
         return
 
-    last = context.user_data["regen"]
+    last = context.user_data["regen_scene"]
+
+    model_name = context.user_data.get(
+        "regen_model",
+        "gemini-2.5-flash"
+    )
+
+    user_revision = update.message.text
 
     prompt = f"""
-REWRITE CERITA.
+TUGAS:
+Perbaiki scene cerita berikut.
 
-CERITA LAMA:
+SCENE LAMA:
 {last['ai_text']}
 
 PERBAIKAN USER:
-{update.message.text}
+{user_revision}
 
 ATURAN:
+- jangan ubah karakter
 - jangan ubah lokasi tiba-tiba
 - jangan ubah waktu tiba-tiba
-- pertahankan karakter
-- transisi realistis
+- dialog realistis
+- jangan meta knowledge NPC
+- pertahankan inti adegan
 """
 
-    ai_text, model = await generate(prompt)
+    await update.message.reply_text(
+        f"🔄 Regenerate pakai:\n{model_name}"
+    )
 
-    context.user_data.pop("regen")
+    ai_text, model = await generate(
+        prompt,
+        model_name
+    )
+
+    # hapus mode regenerate
+    context.user_data.pop(
+        "regen_scene",
+        None
+    )
+
+    context.user_data.pop(
+        "regen_model",
+        None
+    )
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🔁 Regenerate Lagi",
+                callback_data="regen"
+            )
+        ]
+    ]
 
     await update.message.reply_text(
-        ai_text[:3500] + f"\n\n🤖 {model}"
+        ai_text[:3500] + f"\n\n🤖 {model}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 # =========================================================
 # MESSAGE ROUTER
@@ -495,7 +577,13 @@ def main():
             pattern="^regen$"
         )
     )
-
+# PILIH MODEL REGENERATE
+    app.add_handler(
+    CallbackQueryHandler(
+        select_regen_model,
+        pattern="^regenmodel_"
+    )
+)
     app.add_handler(
         CallbackQueryHandler(
             replay,
