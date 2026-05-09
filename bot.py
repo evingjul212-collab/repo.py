@@ -3,7 +3,8 @@ import asyncio
 from telegram import (
     Update,
     InlineKeyboardButton,
-    InlineKeyboardMarkup
+    InlineKeyboardMarkup,
+    BotCommand
 )
 
 from telegram.ext import (
@@ -530,7 +531,35 @@ async def retry_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update, context):
 
     print("ERROR:", context.error)
+# =========================================================
+# SET TELEGRAM MENU
+# =========================================================
+async def set_bot_commands(app):
 
+    commands = [
+
+        BotCommand(
+            "start",
+            "🏠 Menu Utama"
+        ),
+
+        BotCommand(
+            "model",
+            "🤖 Pilih Model AI"
+        ),
+
+        BotCommand(
+            "replay",
+            "📖 Replay Story"
+        ),
+
+        BotCommand(
+            "regen",
+            "🔁 Regenerate Scene"
+        )
+    ]
+
+    await app.bot.set_my_commands(commands)
 
 # =========================================================
 # MAIN
@@ -610,12 +639,27 @@ def main():
 
     print("BOT RUNNING")
 
+# set menu telegram
+    app.post_init = set_bot_commands
+
     app.run_polling(
         poll_interval=1,
         timeout=30,
         drop_pending_updates=True
     )
+    app.add_handler(
+    CommandHandler(
+        "replay",
+        replay
+    )
+)
 
+    app.add_handler(
+    CommandHandler(
+        "regen",
+        regenerate
+    )
+)
 
 # =========================================================
 # RUN
