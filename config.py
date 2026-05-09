@@ -38,12 +38,6 @@ AVAILABLE_MODELS = {
     "Gemini 2.5 Flash":
     "gemini-2.5-flash",
 
-    "Gemini 2.5 Pro":
-    "gemini-2.5-pro",
-
-    "Gemini 2.0 Flash":
-    "gemini-2.0-flash",
-
     # =====================
     # GEMMA
     # =====================
@@ -66,6 +60,6 @@ FALLBACK_MODELS = [
 
         "gemma-4-31b-it",
         "gemini-2.5-flash",
-        "gemini-3.1-flash-lite-preview"
+        "gemini-3.1-flash-preview"
         
 ]
