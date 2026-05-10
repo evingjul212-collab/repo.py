@@ -1,3 +1,4 @@
 python-telegram-bot
 motor
-google-genai
+# google-genai
+google-generativeai==0.5.4
