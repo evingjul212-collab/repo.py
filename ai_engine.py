@@ -1,75 +1,29 @@
-# =========================
-# ai_engine.py
-# =========================
+import os
+import google.generativeai as genai
+import logging
 
-import asyncio
+log = logging.getLogger(__name__)
 
-from google import genai
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-from config import (
-    GEMINI_API_KEY,
-    FALLBACK_MODELS
-)
-
-# =========================
-# GEMINI CLIENT
-# =========================
-
-client = genai.Client(
-    api_key=GEMINI_API_KEY
-)
-
-# =========================
-# GENERATE AI
-# =========================
-
-async def generate(prompt, selected_model):
-
-    # =================================
-    # PRIORITAS MODEL USER
-    # =================================
-
-    models_to_try = [
-        selected_model
-    ] + FALLBACK_MODELS
-
-    # hapus duplicate
-    models_to_try = list(dict.fromkeys(models_to_try))
-
-    # =================================
-    # LOOP MODEL
-    # =================================
-
-    for model in models_to_try:
-
-        try:
-
-            print(f"TRY MODEL: {model}")
-
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt
-            )
-
-            if response and response.text:
-
-                text = response.text.strip()
-
-                if text:
-
-                    return text, model
-
-        except Exception as e:
-
-            print(f"MODEL ERROR {model}: {e}")
-
-            await asyncio.sleep(1)
-
-    # =================================
-    # SEMUA GAGAL
-    # =================================
-
-    return (
-        "⚠️ Semua model sedang sibuk atau error.",
-        "fallback"
-    )
+# ----------------------------------------------------------------------
+# generate – menyesuaikan dengan model yang dipilih
+# ----------------------------------------------------------------------
+async def generate(prompt: str, model_name: str):
+    try:
+        model = genai.GenerativeModel(model_name)
+        resp = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.7,
+                top_p=0.95,
+                max_output_tokens=2048,
+            ),
+        )
+        return resp.text.strip(), model_name
+    except Exception as e:
+        log.exception("Generate error")
+        # fallback ke model default (gemini‑2.5‑flash)
+        fallback = genai.GenerativeModel("gemini-2.5-flash")
+        resp = fallback.generate_content(prompt)
+        return resp.text.strip(), "fallback(gemini-2.5-flash)"
