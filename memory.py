@@ -7,13 +7,13 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from config import MONGO_URL
 client = AsyncIOMotorClient(MONGO_URL)
 db = client.game_db
-users = db.user_states
+# users = db.user_states
 
 logger = logging.getLogger(__name__)
 
 MONGO_URL = os.getenv("MONGO_URL")
 client = AsyncIOMotorClient(MONGO_URL)
-db = client.get_default_database()
+# db = client.get_default_database()
 users = db.users          # koleksi user state
 stories = db.stories      # optional, bila Anda menyimpan terpisah
 
