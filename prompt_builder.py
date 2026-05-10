@@ -1,33 +1,44 @@
-def build_prompt(story, user_msg):
+# --------------------------------------------------------------
+# prompt_builder.py
+# --------------------------------------------------------------
+def build_prompt(metadata: dict, story: list, user_msg: str) -> str:
+    """
+    Parameters
+    ----------
+    metadata : dict
+        {
+            "genre": "...",
+            "system_prompt": "...",
+        }
+    story    : list of scene dicts (ordered)
+    user_msg : string – pesan terbaru user
 
-    return f"""
-KAMU ADALAH STORY ENGINE CERITA DEWASA 21+.
+    Returns
+    -------
+    str – prompt yang siap dikirim ke model Gemini / Gemma.
+    """
 
-ATURAN:
-- Cerita realistis dan natural.
-- Jangan membuat karakter mengetahui informasi yang belum mereka lihat atau dengar sendiri.
-- Jangan membaca pikiran karakter lain.
-- Jangan membuka meta data NPC.
-- Jangan membuat perpindahan waktu mendadak.
-- Jangan mengubah lokasi tanpa transisi jelas.
-- Jangan membuat hubungan romantis berkembang terlalu cepat.
-- Fokus hanya pada adegan saat ini.
-- Dialog harus realistis sesuai jarak lokasi karakter.
-- 50 % berisi dialog dari narasinya
+    # 1️⃣  Ambil beberapa scene terakhir (maks 4) untuk konteks
+    recent = story[-4:] if len(story) >= 4 else story
+    context = ""
+    for scene in recent:
+        context += (
+            f"TURN {scene['turn']}\n"
+            f"USER: {scene['user']}\n"
+            f"AI:   {scene['ai']}\n\n"
+        )
 
-GENRE:
-{story['genre']}
+    # 2️⃣  Sistem / aturan utama
+    system_prompt = metadata.get("system_prompt", "")
+    genre = metadata.get("genre", "")
 
-SUMMARY:
-{story['summary']}
-
-USER:
+    # 3️⃣  Susun prompt akhir
+    prompt = f"""SYSTEM:
+{system_prompt}
+GENRE: {genre}
+--- CONTEXT (last {len(recent)} turns) ---
+{context}
+--- USER INPUT ---
 {user_msg}
-
-OUTPUT FORMAT:
-[LOCATION]
-[SCENE]
-[CHARACTER ACTION]
-[DIALOG]
-[NEXT HOOK]
 """
+    return prompt
