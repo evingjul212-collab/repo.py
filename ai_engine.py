@@ -1,10 +1,10 @@
 import os
-import google.generativeai as genai
+from google import genai
 import logging
 
 log = logging.getLogger(__name__)
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+client_ai = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # ----------------------------------------------------------------------
 # generate – menyesuaikan dengan model yang dipilih
