@@ -203,19 +203,106 @@ async def import_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+# -------------------------------------------------
+# `handle_story_file`)
+# -------------------------------------------------
 async def handle_story_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Handler yang dipicu saat user mengirim file .txt setelah /import.
-    - Membaca file.  
-    - Memecah menjadi scene‑scene (delimiter `━━━━━━━━━━━━━━━━━━`).  
-    - Menyimpan setiap scene ke MongoDB (`memory.update_story`).  
-    - Menampilkan **scene terakhir** yang berhasil di‑import.
+    1️⃣ Unduh file .txt ke /tmp
+    2️⃣ Baca isinya
+    3️⃣ Pecah menjadi scene (delimiter “━━━━━━━━━━━━━━━━━━”)
+    4️⃣ Simpan setiap scene ke DB dengan field turn, user, ai
+    5️⃣ Tampilkan scene terakhir sebagai konfirmasi
     """
     document = update.message.document
 
+    # ---- validasi ekstensi ----
     if not document.file_name.lower().endswith(".txt"):
         await update.message.reply_text("❌ Hanya file *.txt* yang dapat di‑import.")
         return
+
+    # ---- unduh ----
+    file_obj = await document.get_file()
+    local_path = Path("/tmp") / document.file_name
+    await file_obj.download_to_drive(custom_path=str(local_path))
+
+    # ---- baca ----
+    try:
+        content = local_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.error("Gagal membaca file txt: %s", exc)
+        await update.message.reply_text("❌ Gagal membaca file .txt.")
+        return
+    finally:
+        # bersihkan file lokal
+        try:
+            local_path.unlink()
+        except Exception:
+            pass
+
+    if not content.strip():
+        await update.message.reply_text("⚠️ File kosong. Tidak ada cerita yang di‑import.")
+        return
+
+    # ---- 1. Pecah menjadi scene ----
+    raw_scenes = re.split(r"━━━━━━━━━━━━━━━━━━", content)
+    scenes = [s.strip() for s in raw_scenes if s.strip()]
+
+    # ---- 2. Reset story lama & buat dokumen user bila belum ada ----
+    user_id = update.effective_user.id
+    await memory.init_user(user_id)                     # buat dokumen bila belum ada
+    await memory.users.update_one(
+        {"_id": user_id},
+        {
+            "$set": {
+                "state": "STORY",
+                "selected_model": "gemini-2.5-flash",  # default, bisa di‑ubah lewat /model
+                "story": [],                           # kosongkan dulu
+                "genre": "imported",
+                "prompt_template": "",                 # tidak dipakai lagi
+            }
+        },
+    )
+
+    # ---- 3. Simpan tiap scene ke DB ----
+    turn_counter = 0
+    for scene in scenes:
+        # Ambil bagian USER & AI bila ada; kalau tidak, gunakan fallback.
+        user_match = re.search(r"USER:\s*(.+?)(?=\nAI:|$)", scene, flags=re.S)
+        ai_match   = re.search(r"AI:\s*(.+)", scene, flags=re.S)
+
+        user_text = user_match.group(1).strip() if user_match else "(imported story)"
+        ai_text   = ai_match.group(1).strip()   if ai_match   else ""
+
+        await memory.users.update_one(
+            {"_id": user_id},
+            {
+                "$push": {
+                    "story": {
+                        "turn": turn_counter,
+                        "user": user_text,
+                        "ai":   ai_text,
+                    }
+                }
+            },
+        )
+        turn_counter += 1
+
+    # ---- 4. Tampilkan scene terakhir (konfirmasi) ----
+    last_scene = await memory.get_last_scene(user_id)
+
+    if not last_scene:
+        await update.message.reply_text("⚠️ Tidak ada scene yang berhasil di‑import.")
+        return
+
+    await update.message.reply_text(
+        "✅ *Story berhasil di‑import!* Berikut scene terakhir yang akan menjadi titik "
+        "awal percakapan:\n\n"
+        f"*TURN {last_scene['turn']}*\n"
+        f"*USER:* {last_scene['user'][:200]}\n"
+        f"*AI:* {last_scene['ai'][:200]}",
+        parse_mode="Markdown",
+    )
 
     # Unduh file ke /tmp
     file_obj = await document.get_file()
